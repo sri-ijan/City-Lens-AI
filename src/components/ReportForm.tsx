@@ -1,18 +1,16 @@
 import React, { useState, useRef, DragEvent, ChangeEvent } from "react";
-import { 
-  UploadCloud, 
-  Trash2, 
-  Sparkles, 
-  AlertTriangle, 
-  Clock, 
-  Building, 
-  ShieldAlert, 
-  MapPin, 
+import {
+  UploadCloud,
+  Trash2,
+  Sparkles,
+  Clock,
+  Building,
+  ShieldAlert,
+  MapPin,
   User,
   CheckCircle,
-  HelpCircle,
   BarChart2,
-  ThumbsUp
+  ThumbsUp,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { analyzeIssueImage, CivicAnalysis } from "../services/geminiService";
@@ -30,22 +28,18 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<CivicAnalysis | null>(null);
   const [loadingStep, setLoadingStep] = useState("");
-  
-  // Custom user inputs to accompany the report
   const [landmark, setLandmark] = useState("");
   const [reporterName, setReporterName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Loading animation simulation steps for the user
   const loadingSteps = [
-    "Uploading visual payload...",
-    "Gemini inspecting image pixels...",
-    "Assessing Indian structural integrity...",
-    "Detecting environmental safety hazards...",
-    "Mapping to municipal department protocols...",
-    "Formulating action recommendations..."
+    "Uploading image payload...",
+    "Gemini inspecting visual data...",
+    "Assessing structural integrity...",
+    "Detecting safety hazards...",
+    "Mapping to municipal departments...",
+    "Formulating recommendations...",
   ];
 
   const triggerSpinnerSequence = () => {
@@ -58,52 +52,34 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
     return interval;
   };
 
-  // Drag and drop handlers
   const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragging(true);
   };
-
-  const handleDragLeave = () => {
-    setIsDragging(false);
-  };
-
+  const handleDragLeave = () => setIsDragging(false);
   const handleDrop = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragging(false);
-    
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      processFile(e.dataTransfer.files[0]);
-    }
+    if (e.dataTransfer.files?.[0]) processFile(e.dataTransfer.files[0]);
   };
-
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      processFile(e.target.files[0]);
-    }
+    if (e.target.files?.[0]) processFile(e.target.files[0]);
   };
 
   const processFile = (file: File) => {
     if (!file.type.startsWith("image/")) {
-      toast.error("Please upload an image file (PNG, JPG, etc.)");
+      toast.error("Please upload an image file.");
       return;
     }
-    
-    // File size limit of 10MB
     if (file.size > 10 * 1024 * 1024) {
-      toast.error("Image file is too large. Max size is 10MB.");
+      toast.error("Max file size is 10MB.");
       return;
     }
-
     setImageFile(file);
-    setAnalysis(null); // Clear previous analysis when a new file is uploaded
-    
+    setAnalysis(null);
     const reader = new FileReader();
-    reader.onloadend = () => {
-      setImagePreview(reader.result as string);
-    };
+    reader.onloadend = () => setImagePreview(reader.result as string);
     reader.readAsDataURL(file);
-    toast.success("Image uploaded successfully!");
   };
 
   const handleRemoveImage = () => {
@@ -112,27 +88,19 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
     setAnalysis(null);
     setLandmark("");
     setReporterName("");
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const handleAnalyze = async () => {
-    if (!imageFile) {
-      toast.error("Please upload an image to analyze.");
-      return;
-    }
-
+    if (!imageFile) return;
     setIsAnalyzing(true);
     const intervalId = triggerSpinnerSequence();
-
     try {
       const result = await analyzeIssueImage(imageFile);
       setAnalysis(result);
-      toast.success("AI Analysis Completed!");
+      toast.success("Analysis complete");
     } catch (error: any) {
-      console.error(error);
-      toast.error(error.message || "AI Analysis failed. Please try again.");
+      toast.error(error.message || "Analysis failed.");
     } finally {
       clearInterval(intervalId);
       setIsAnalyzing(false);
@@ -141,82 +109,72 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!analysis) {
-      toast.error("Please analyze the image with AI before submitting.");
-      return;
-    }
-
+    if (!analysis) return;
     setIsSubmitting(true);
-    const payload = {
-      analysis,
-      landmark: landmark.trim() || "Unspecified location",
-      reporterName: reporterName.trim() || "Anonymous",
-      createdAt: new Date().toISOString(),
-      status: "Pending" // Initial status of reported issue
-    };
-
-    console.log("Submitting Civic Report:", payload);
-
     try {
-      // Save report to Firestore 'reports' collection
-      await addDoc(collection(db, "reports"), payload);
-      
-      toast.success("Report registered successfully on Firestore!");
-      
-      // Reset form
+      await addDoc(collection(db, "reports"), {
+        analysis,
+        landmark: landmark.trim() || "Unspecified location",
+        reporterName: reporterName.trim() || "Anonymous",
+        createdAt: new Date().toISOString(),
+        status: "Pending",
+      });
+      toast.success("Report submitted successfully");
       handleRemoveImage();
-      
-      // Callback to refresh dashboard list
       onReportSubmitted();
     } catch (error: any) {
-      console.error("Firestore Save Error:", error);
-      toast.error("Could not persist report to Firestore. Printed to Console instead.");
+      toast.error("Failed to submit report.");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Helper to color-code severity badges
-  const getSeverityBadgeClass = (severity: string) => {
+  const getSeverityConfig = (severity: string) => {
     switch (severity?.toLowerCase()) {
-      case "critical":
-        return "bg-red-500/10 text-red-400 border-red-500/30";
-      case "high":
-        return "bg-orange-500/10 text-orange-400 border-orange-500/30";
-      case "medium":
-        return "bg-amber-500/10 text-amber-400 border-amber-500/30";
-      case "low":
-        return "bg-emerald-500/10 text-emerald-400 border-emerald-500/30";
-      default:
-        return "bg-gray-500/10 text-gray-400 border-gray-500/30";
+      case "critical": return "bg-red-500/10 text-red-400 border-red-500/20";
+      case "high":     return "bg-orange-500/10 text-orange-400 border-orange-500/20";
+      case "medium":   return "bg-amber-500/10 text-amber-400 border-amber-500/20";
+      case "low":      return "bg-stone-500/10 text-stone-400 border-stone-500/20";
+      default:         return "bg-zinc-500/10 text-zinc-400 border-zinc-500/20";
     }
   };
 
+  const inputStyle = {
+    background: "#0f0d0b",
+    border: "1px solid #2a2520",
+    color: "#e7e5e4",
+  };
+
   return (
-    <div className="w-full max-w-6xl mx-auto px-4 py-8">
-      <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
-        
-        {/* Left Side: Upload and Form Controls */}
-        <div className="lg:col-span-6 flex flex-col gap-6">
-          <div className="rounded-2xl border border-gray-800 bg-gray-900 p-6 shadow-xl">
-            <h2 className="mb-4 text-xl font-bold tracking-tight text-white flex items-center gap-2">
-              <UploadCloud className="h-5 w-5 text-blue-500" />
-              <span>Capture & Upload Civic Issue</span>
-            </h2>
-            
-            {/* Image Upload Area */}
+    <div className="w-full max-w-5xl mx-auto px-5 py-8">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+
+        {/* LEFT — Upload + Form */}
+        <div className="lg:col-span-6 flex flex-col gap-5">
+
+          {/* Upload card */}
+          <div
+            className="rounded-2xl p-5"
+            style={{ background: "#161310", border: "1px solid #2a2520" }}
+          >
+            <div className="flex items-center gap-2 mb-4">
+              <UploadCloud className="h-4 w-4 text-amber-600/70" />
+              <h2 className="text-sm font-semibold text-stone-200 tracking-tight">
+                Capture & Upload Civic Issue
+              </h2>
+            </div>
+
             {!imagePreview ? (
               <div
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
                 onClick={() => fileInputRef.current?.click()}
-                className={`group relative flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 text-center transition-all cursor-pointer min-h-[220px] ${
-                  isDragging
-                    ? "border-blue-500 bg-blue-500/5"
-                    : "border-gray-800 bg-gray-950 hover:border-gray-700 hover:bg-gray-900/50"
-                }`}
-                id="drop-zone"
+                className="relative flex flex-col items-center justify-center rounded-xl p-10 text-center cursor-pointer transition-all min-h-[200px]"
+                style={{
+                  background: isDragging ? "#1c1a14" : "#0f0d0b",
+                  border: `2px dashed ${isDragging ? "#92400e" : "#2a2520"}`,
+                }}
               >
                 <input
                   type="file"
@@ -225,103 +183,116 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
                   accept="image/*"
                   className="hidden"
                 />
-                
-                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-gray-900 border border-gray-800 group-hover:scale-105 transition-transform">
-                  <UploadCloud className="h-7 w-7 text-gray-400 group-hover:text-blue-500 transition-colors" />
+                <div
+                  className="mb-3 flex h-12 w-12 items-center justify-center rounded-full"
+                  style={{ background: "#1c1917", border: "1px solid #2a2520" }}
+                >
+                  <UploadCloud className="h-5 w-5 text-stone-500" />
                 </div>
-                
-                <p className="text-sm font-semibold text-white">
-                  Drag and drop your image here, or <span className="text-blue-500">browse</span>
+                <p className="text-sm font-medium text-stone-300">
+                  Drop image here, or{" "}
+                  <span className="text-amber-500">browse</span>
                 </p>
-                <p className="mt-1.5 text-xs text-gray-400">
-                  Supports PNG, JPG, JPEG, WEBP (Max 10MB)
+                <p className="mt-1 text-[11px] text-stone-600">
+                  PNG, JPG, JPEG, WEBP — max 10MB
                 </p>
               </div>
             ) : (
-              /* Image Preview Area */
-              <div className="relative rounded-xl overflow-hidden border border-gray-800 bg-gray-950">
+              <div
+                className="relative rounded-xl overflow-hidden"
+                style={{ border: "1px solid #2a2520" }}
+              >
                 <img
                   src={imagePreview}
-                  alt="Civic issue preview"
-                  className="w-full max-h-[320px] object-contain mx-auto"
+                  alt="Preview"
+                  className="w-full max-h-[280px] object-contain"
+                  style={{ background: "#0f0d0b" }}
                 />
-                
-                {/* Delete/Remove button overlay */}
                 <button
                   type="button"
                   onClick={handleRemoveImage}
-                  className="absolute top-3 right-3 flex h-9 w-9 items-center justify-center rounded-full bg-black/70 hover:bg-red-600/90 text-white transition-colors border border-white/10"
-                  title="Remove image"
-                  id="remove-image-btn"
+                  className="absolute top-2.5 right-2.5 flex h-8 w-8 items-center justify-center rounded-full transition-colors"
+                  style={{ background: "rgba(0,0,0,0.7)", border: "1px solid #3d3330" }}
                 >
-                  <Trash2 className="h-4.5 w-4.5" />
+                  <Trash2 className="h-3.5 w-3.5 text-stone-400" />
                 </button>
               </div>
             )}
 
-            {/* AI Action button */}
             {imagePreview && !analysis && (
-              <div className="mt-6">
-                <button
-                  type="button"
-                  disabled={isAnalyzing}
-                  onClick={handleAnalyze}
-                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3.5 transition-colors shadow-lg shadow-blue-600/20 disabled:opacity-50 disabled:cursor-not-allowed"
-                  id="analyze-ai-btn"
-                >
-                  {isAnalyzing ? (
-                    <>
-                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
-                      <span>{loadingStep}</span>
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="h-5 w-5" />
-                      <span>Analyze with Gemini AI</span>
-                    </>
-                  )}
-                </button>
-              </div>
+              <button
+                type="button"
+                disabled={isAnalyzing}
+                onClick={handleAnalyze}
+                className="w-full mt-4 flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold text-white transition-all disabled:opacity-50"
+                style={{ background: "#92400e" }}
+                onMouseEnter={(e) => !isAnalyzing && ((e.currentTarget as HTMLElement).style.background = "#78350f")}
+                onMouseLeave={(e) => !isAnalyzing && ((e.currentTarget as HTMLElement).style.background = "#92400e")}
+              >
+                {isAnalyzing ? (
+                  <>
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                    <span className="text-xs">{loadingStep}</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4" />
+                    Analyze with Gemini AI
+                  </>
+                )}
+              </button>
             )}
           </div>
 
-          {/* Form details, only unlocked after AI has generated the report */}
+          {/* Reporter form — unlocks after analysis */}
           {analysis && (
-            <form onSubmit={handleSubmit} className="rounded-2xl border border-gray-800 bg-gray-900 p-6 shadow-xl flex flex-col gap-4">
-              <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                <MapPin className="h-5 w-5 text-blue-500" />
-                <span>Reporter Details & Submission</span>
-              </h3>
-              
+            <form
+              onSubmit={handleSubmit}
+              className="rounded-2xl p-5 flex flex-col gap-4"
+              style={{ background: "#161310", border: "1px solid #2a2520" }}
+            >
+              <div className="flex items-center gap-2">
+                <MapPin className="h-4 w-4 text-amber-600/70" />
+                <h3 className="text-sm font-semibold text-stone-200">
+                  Reporter Details & Submission
+                </h3>
+              </div>
+
               <div>
-                <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
-                  Nearest Landmark / Location (Street, Ward, City) *
+                <label className="block text-[10px] font-semibold text-stone-500 uppercase tracking-widest mb-1.5">
+                  Nearest Landmark / Location *
                 </label>
                 <div className="relative">
-                  <MapPin className="absolute left-3.5 top-3.5 h-4 w-4 text-gray-500" />
+                  <MapPin className="absolute left-3 top-3 h-3.5 w-3.5 text-stone-600" />
                   <input
                     type="text"
                     required
                     value={landmark}
                     onChange={(e) => setLandmark(e.target.value)}
                     placeholder="e.g., Near Metro Pillar 142, Indiranagar, Bengaluru"
-                    className="w-full rounded-xl bg-gray-950 border border-gray-800 pl-10 pr-4 py-3 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-600 transition-colors"
+                    className="w-full rounded-xl pl-9 pr-4 py-2.5 text-sm placeholder-stone-600 outline-none transition-colors"
+                    style={inputStyle}
+                    onFocus={(e) => (e.target.style.borderColor = "#92400e")}
+                    onBlur={(e) => (e.target.style.borderColor = "#2a2520")}
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+                <label className="block text-[10px] font-semibold text-stone-500 uppercase tracking-widest mb-1.5">
                   Your Name (Optional)
                 </label>
                 <div className="relative">
-                  <User className="absolute left-3.5 top-3.5 h-4 w-4 text-gray-500" />
+                  <User className="absolute left-3 top-3 h-3.5 w-3.5 text-stone-600" />
                   <input
                     type="text"
                     value={reporterName}
                     onChange={(e) => setReporterName(e.target.value)}
                     placeholder="Leave blank for Anonymous"
-                    className="w-full rounded-xl bg-gray-950 border border-gray-800 pl-10 pr-4 py-3 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-600 transition-colors"
+                    className="w-full rounded-xl pl-9 pr-4 py-2.5 text-sm placeholder-stone-600 outline-none transition-colors"
+                    style={inputStyle}
+                    onFocus={(e) => (e.target.style.borderColor = "#92400e")}
+                    onBlur={(e) => (e.target.style.borderColor = "#2a2520")}
                   />
                 </div>
               </div>
@@ -329,18 +300,20 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="w-full mt-2 flex items-center justify-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 transition-colors shadow-lg shadow-emerald-600/10 disabled:opacity-50"
-                id="submit-report-btn"
+                className="w-full flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold text-white transition-all disabled:opacity-50 mt-1"
+                style={{ background: "#1a3a2a", border: "1px solid #1e4d35", color: "#6ee7b7" }}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = "#1e4d35")}
+                onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "#1a3a2a")}
               >
                 {isSubmitting ? (
                   <>
-                    <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
-                    <span>Persisting to Firestore...</span>
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-emerald-400/30 border-t-emerald-400" />
+                    Saving to Firestore...
                   </>
                 ) : (
                   <>
-                    <CheckCircle className="h-5 w-5" />
-                    <span>Submit Official Civic Report</span>
+                    <CheckCircle className="h-4 w-4" />
+                    Submit Civic Report
                   </>
                 )}
               </button>
@@ -348,98 +321,147 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
           )}
         </div>
 
-        {/* Right Side: Analysis Card */}
+        {/* RIGHT — Analysis Result */}
         <div className="lg:col-span-6">
           {!analysis ? (
-            <div className="h-full rounded-2xl border border-gray-800 bg-gray-900 p-8 flex flex-col items-center justify-center text-center text-gray-400 min-h-[350px]">
-              <Sparkles className="h-12 w-12 text-gray-700 mb-4 animate-pulse" />
-              <h3 className="text-lg font-bold text-gray-300">Awaiting AI Analysis</h3>
-              <p className="mt-2 text-sm max-w-sm text-gray-500 leading-relaxed">
-                Upload a photo of any local Indian civic issue—such as potholes, overflowing garbage piles, open sewers, or broken street lights—and trigger the AI inspection.
+            <div
+              className="h-full rounded-2xl p-8 flex flex-col items-center justify-center text-center min-h-[300px]"
+              style={{ background: "#161310", border: "1px solid #2a2520" }}
+            >
+              <div
+                className="h-14 w-14 rounded-full flex items-center justify-center mb-4"
+                style={{ background: "#1c1917", border: "1px solid #2a2520" }}
+              >
+                <Sparkles className="h-6 w-6 text-stone-600" />
+              </div>
+              <h3 className="text-sm font-semibold text-stone-400 mb-2">
+                Awaiting AI Analysis
+              </h3>
+              <p className="text-xs text-stone-600 max-w-xs leading-relaxed">
+                Upload a photo of any civic issue — potholes, garbage, broken
+                streetlights, drainage — and trigger the AI inspection.
               </p>
             </div>
           ) : (
-            <div className="rounded-2xl border border-blue-500/20 bg-gray-900 p-6 shadow-xl relative overflow-hidden">
-              {/* Subtle top decoration badge */}
-              <div className="absolute top-0 right-0 left-0 h-[3px] bg-gradient-to-r from-blue-500 via-teal-500 to-indigo-500"></div>
+            <div
+              className="rounded-2xl p-5 relative overflow-hidden"
+              style={{ background: "#161310", border: "1px solid #2a2520" }}
+            >
+              {/* Amber top bar */}
+              <div
+                className="absolute top-0 left-0 right-0 h-[2px]"
+                style={{ background: "linear-gradient(to right, #92400e, #d97706, #92400e)" }}
+              />
 
-              <div className="flex items-center justify-between gap-4 mb-4 flex-wrap">
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-500/10 px-3 py-1 text-xs font-semibold text-blue-400 border border-blue-500/20">
-                  <Sparkles className="h-3.5 w-3.5" />
+              {/* Header */}
+              <div className="flex items-center justify-between mb-4 pt-1">
+                <span
+                  className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold"
+                  style={{ background: "#1c1410", color: "#d97706", border: "1px solid #3d2e1e" }}
+                >
+                  <Sparkles className="h-3 w-3" />
                   AI Analysis Completed
                 </span>
-                
-                <span className="text-xs font-mono text-gray-400">
-                  Confidence: <span className="text-emerald-400 font-semibold">{(analysis.confidence * 100).toFixed(0)}%</span>
+                <span className="text-[11px] text-stone-500">
+                  Confidence:{" "}
+                  <span className="text-stone-300 font-semibold">
+                    {(analysis.confidence * 100).toFixed(0)}%
+                  </span>
                 </span>
               </div>
 
-              {/* Title & Category */}
-              <div className="border-b border-gray-800 pb-4 mb-4">
-                <div className="flex items-center gap-2 flex-wrap mb-1.5">
-                  <span className={`text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${getSeverityBadgeClass(analysis.severity)}`}>
+              {/* Severity + category + title */}
+              <div
+                className="pb-4 mb-4"
+                style={{ borderBottom: "1px solid #2a2520" }}
+              >
+                <div className="flex items-center gap-2 flex-wrap mb-2">
+                  <span
+                    className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${getSeverityConfig(analysis.severity)}`}
+                  >
                     {analysis.severity} Severity
                   </span>
-                  <span className="text-xs bg-gray-800 text-gray-300 px-2 py-0.5 rounded border border-gray-700">
+                  <span
+                    className="text-[10px] px-2 py-0.5 rounded text-stone-400"
+                    style={{ background: "#1c1917", border: "1px solid #2a2520" }}
+                  >
                     {analysis.category}
                   </span>
                 </div>
-                <h3 className="text-xl font-bold text-white leading-snug">{analysis.title}</h3>
+                <h3 className="text-base font-semibold text-stone-100 leading-snug">
+                  {analysis.title}
+                </h3>
               </div>
 
               {/* Description */}
-              <div className="mb-5">
-                <h4 className="text-xs font-semibold uppercase text-gray-400 tracking-wider mb-2">Visible Evidence Description</h4>
-                <p className="text-sm text-gray-300 bg-gray-950/60 p-4 rounded-xl border border-gray-800/80 leading-relaxed">
+              <div className="mb-4">
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-stone-600 mb-2">
+                  Visible Evidence
+                </p>
+                <p
+                  className="text-xs text-stone-400 p-3 rounded-xl leading-relaxed"
+                  style={{ background: "#0f0d0b", border: "1px solid #2a2520" }}
+                >
                   {analysis.description}
                 </p>
               </div>
 
-              {/* Grid: Stats & Details */}
-              <div className="grid grid-cols-2 gap-4 mb-5">
-                <div className="rounded-xl border border-gray-800 bg-gray-950/40 p-3">
-                  <div className="flex items-center gap-1.5 text-xs text-gray-400 font-semibold uppercase tracking-wider mb-1">
-                    <BarChart2 className="h-3.5 w-3.5 text-blue-500" />
+              {/* Stats grid */}
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <div
+                  className="rounded-xl p-3"
+                  style={{ background: "#0f0d0b", border: "1px solid #2a2520" }}
+                >
+                  <div className="flex items-center gap-1 text-[10px] text-stone-600 uppercase tracking-wider mb-1">
+                    <BarChart2 className="h-3 w-3" />
                     Severity Score
                   </div>
-                  <p className="text-lg font-bold text-white">
-                    {analysis.severity_score} <span className="text-xs text-gray-500">/ 10</span>
+                  <p className="text-lg font-bold text-stone-100">
+                    {analysis.severity_score}
+                    <span className="text-xs text-stone-600 font-normal"> / 10</span>
                   </p>
                 </div>
 
-                <div className="rounded-xl border border-gray-800 bg-gray-950/40 p-3">
-                  <div className="flex items-center gap-1.5 text-xs text-gray-400 font-semibold uppercase tracking-wider mb-1">
-                    <Clock className="h-3.5 w-3.5 text-amber-500" />
-                    Est. Resolve Time
+                <div
+                  className="rounded-xl p-3"
+                  style={{ background: "#0f0d0b", border: "1px solid #2a2520" }}
+                >
+                  <div className="flex items-center gap-1 text-[10px] text-stone-600 uppercase tracking-wider mb-1">
+                    <Clock className="h-3 w-3" />
+                    Est. Repair
                   </div>
-                  <p className="text-lg font-bold text-white">
+                  <p className="text-sm font-bold text-stone-100">
                     {analysis.estimated_repair_time}
                   </p>
                 </div>
 
-                <div className="col-span-2 rounded-xl border border-gray-800 bg-gray-950/40 p-3.5">
-                  <div className="flex items-center gap-1.5 text-xs text-gray-400 font-semibold uppercase tracking-wider mb-1.5">
-                    <Building className="h-3.5 w-3.5 text-indigo-400" />
+                <div
+                  className="col-span-2 rounded-xl p-3"
+                  style={{ background: "#0f0d0b", border: "1px solid #2a2520" }}
+                >
+                  <div className="flex items-center gap-1 text-[10px] text-stone-600 uppercase tracking-wider mb-1">
+                    <Building className="h-3 w-3" />
                     Responsible Department
                   </div>
-                  <p className="text-sm font-bold text-white">
+                  <p className="text-sm font-semibold text-stone-200">
                     {analysis.department}
                   </p>
                 </div>
               </div>
 
-              {/* Hazards detected */}
-              {analysis.hazards && analysis.hazards.length > 0 && (
-                <div className="mb-5">
-                  <h4 className="text-xs font-semibold uppercase text-gray-400 tracking-wider mb-2 flex items-center gap-1.5">
-                    <ShieldAlert className="h-4 w-4 text-red-500" />
-                    Safety Hazards Detected
-                  </h4>
+              {/* Hazards */}
+              {analysis.hazards?.length > 0 && (
+                <div className="mb-4">
+                  <div className="flex items-center gap-1 text-[10px] text-stone-600 uppercase tracking-wider mb-2">
+                    <ShieldAlert className="h-3 w-3 text-red-500/60" />
+                    Hazards Detected
+                  </div>
                   <div className="flex flex-wrap gap-1.5">
-                    {analysis.hazards.map((hazard, index) => (
-                      <span 
-                        key={index} 
-                        className="text-xs bg-red-500/10 border border-red-500/20 text-red-400 px-2.5 py-1 rounded-lg font-medium"
+                    {analysis.hazards.map((hazard, i) => (
+                      <span
+                        key={i}
+                        className="text-[11px] px-2 py-0.5 rounded-md text-red-400"
+                        style={{ background: "#1c0a0a", border: "1px solid #3d1515" }}
                       >
                         ⚠ {hazard}
                       </span>
@@ -448,21 +470,22 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
                 </div>
               )}
 
-              {/* Recommended Action */}
-              <div className="rounded-xl bg-blue-500/5 border border-blue-500/20 p-4.5">
-                <h4 className="text-xs font-semibold uppercase text-blue-400 tracking-wider mb-1.5 flex items-center gap-1.5">
-                  <ThumbsUp className="h-4 w-4" />
-                  Recommended Inspector Action
-                </h4>
-                <p className="text-sm text-gray-300 leading-relaxed">
+              {/* Recommended action */}
+              <div
+                className="rounded-xl p-3.5"
+                style={{ background: "#0f0d0b", border: "1px solid #2a2520" }}
+              >
+                <div className="flex items-center gap-1 text-[10px] text-stone-600 uppercase tracking-wider mb-1.5">
+                  <ThumbsUp className="h-3 w-3 text-amber-600/60" />
+                  Recommended Action
+                </div>
+                <p className="text-xs text-stone-400 leading-relaxed">
                   {analysis.recommended_action}
                 </p>
               </div>
-
             </div>
           )}
         </div>
-
       </div>
     </div>
   );
