@@ -61,3 +61,37 @@ export async function analyzeIssueImage(imageFile: File): Promise<CivicAnalysis>
     throw new Error(error.message || "Failed to analyze image. Please try again.");
   }
 }
+
+export interface ComplaintParams {
+  issueType: string;
+  location: string;
+  description: string;
+  reporterName?: string;
+  dateOfIncident?: string;
+}
+
+/**
+ * Sends complaint parameters to the server-side endpoint to generate a formal complaint letter.
+ */
+export async function generateComplaintLetter(params: ComplaintParams): Promise<string> {
+  try {
+    const response = await fetch("/api/complaint", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(params),
+    });
+
+    if (!response.ok) {
+      const errorJson = await response.json();
+      throw new Error(errorJson.error || "Server failed to generate complaint letter");
+    }
+
+    const result = await response.json();
+    return result.complaint;
+  } catch (error: any) {
+    console.error("Error generating complaint letter:", error);
+    throw new Error(error.message || "Failed to generate complaint letter. Please try again.");
+  }
+}
