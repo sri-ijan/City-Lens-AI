@@ -8,10 +8,13 @@ import {
   doc, 
   updateDoc, 
   deleteDoc,
-  runTransaction
+  runTransaction,
+  increment
 } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import { CivicAnalysis } from "../services/geminiService";
+import { useAuth } from "../hooks/useAuth";
+import { creditGreenCoins } from "../services/rewardService";
 import { 
   CheckCircle, 
   Clock, 
@@ -24,7 +27,12 @@ import {
   User, 
   Trash2,
   ListFilter,
-  ThumbsUp
+  ThumbsUp,
+  XCircle,
+  AlertTriangle,
+  Sparkles,
+  X,
+  Award
 } from "lucide-react";
 
 interface ReportDocument {
@@ -37,9 +45,80 @@ interface ReportDocument {
   upvotes?: number;
   reporterUid?: string | null;
   upvoteRewardCredited?: boolean;
+  upvoteRewardGiven?: boolean;
 }
 
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => {
+      const result = reader.result as string;
+      const base64 = result.split(",")[1];
+      resolve(base64);
+    };
+    reader.onerror = (error) => reject(error);
+  });
+};
+
+const formatRelativeTime = (dateString: string): string => {
+  try {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffMins < 1) return "just now";
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    return `${diffDays}d ago`;
+  } catch {
+    return "recent";
+  }
+};
+
+const renderSeverityScoreDots = (severity: string, score?: number) => {
+  let filled = 1;
+  if (score && score <= 5) {
+    filled = Math.round(score);
+  } else if (score && score <= 10) {
+    filled = Math.round(score / 2);
+  } else {
+    if (severity === "Critical") filled = 5;
+    else if (severity === "High") filled = 4;
+    else if (severity === "Medium") filled = 3;
+    else filled = 1;
+  }
+  
+  filled = Math.max(1, Math.min(5, filled));
+
+  return (
+    <div className="flex items-center gap-1 mt-1" title={`Severity Score: ${score || severity}`}>
+      <span className="text-[10px] text-[#78716c] font-semibold mr-1">Impact:</span>
+      {[1, 2, 3, 4, 5].map((dot) => (
+        <span
+          key={dot}
+          className={`h-1.5 w-1.5 rounded-full ${
+            dot <= filled
+              ? severity === "Critical"
+                ? "bg-red-500"
+                : severity === "High"
+                ? "bg-orange-500"
+                : severity === "Medium"
+                ? "bg-amber-500"
+                : "bg-stone-400"
+              : "bg-[#2a2520]"
+          }`}
+        />
+      ))}
+    </div>
+  );
+};
+
 export default function Dashboard() {
+  const { user } = useAuth();
   const [reports, setReports] = useState<ReportDocument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
@@ -47,6 +126,29 @@ export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [severityFilter, setSeverityFilter] = useState("All");
   const [categoryFilter, setCategoryFilter] = useState("All");
+  const [statusFilter, setStatusFilter] = useState<"All" | "Pending" | "In Progress" | "Resolved">("All");
+
+  const [votedReports, setVotedReports] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("citylens_voted_reports") || "[]");
+    } catch {
+      return [];
+    }
+  });
+
+  // Modal State for resolution verifier
+  const [isResolveModalOpen, setIsResolveModalOpen] = useState(false);
+  const [selectedReportForResolution, setSelectedReportForResolution] = useState<ReportDocument | null>(null);
+  const [afterImageFile, setAfterImageFile] = useState<File | null>(null);
+  const [afterImagePreview, setAfterImagePreview] = useState<string | null>(null);
+  const [isVerifyingResolution, setIsVerifyingResolution] = useState(false);
+  const [resolutionResult, setResolutionResult] = useState<{
+    isResolved: boolean;
+    fixQuality: "Poor" | "Partial" | "Complete";
+    confidence: number;
+    verificationSummary: string;
+    remainingConcerns: string[];
+  } | null>(null);
 
   // Real-time listener for reports in Firestore
   useEffect(() => {
@@ -68,13 +170,13 @@ export default function Dashboard() {
             upvotes: typeof data.upvotes === "number" ? data.upvotes : 0,
             reporterUid: data.reporterUid || null,
             upvoteRewardCredited: !!data.upvoteRewardCredited,
+            upvoteRewardGiven: !!data.upvoteRewardGiven,
           });
         });
         setReports(reportsList);
         setIsLoading(false);
       },
       (error) => {
-        console.error("Firestore live feed subscription error:", error);
         handleFirestoreError(error, OperationType.LIST, "reports");
         setIsLoading(false);
       }
@@ -88,19 +190,17 @@ export default function Dashboard() {
       const docRef = doc(db, "reports", id);
       
       if (newStatus === "Resolved") {
-        // Run as a transaction to award coins atomically and prevent double resolution rewards
         await runTransaction(db, async (transaction) => {
           const reportSnap = await transaction.get(docRef);
           if (!reportSnap.exists()) return;
           
           const reportData = reportSnap.data();
           if (reportData.status === "Resolved") {
-            return; // Already resolved
+            return;
           }
           
           transaction.update(docRef, { status: "Resolved" });
           
-          // If there's an associated registered user, credit them +50 GreenCoins for resolving the issue!
           if (reportData.reporterUid && !reportData.resolvedRewardCredited) {
             const reporterUid = reportData.reporterUid;
             const citizenRef = doc(db, "citizens", reporterUid);
@@ -116,7 +216,6 @@ export default function Dashboard() {
                 updatedAt: new Date().toISOString()
               });
               
-              // Record transaction subcollection document
               const transactionsCollectionRef = collection(db, "citizens", reporterUid, "transactions");
               const newTxRef = doc(transactionsCollectionRef);
               transaction.set(newTxRef, {
@@ -136,15 +235,20 @@ export default function Dashboard() {
         toast.success(`Report status updated to ${newStatus}!`);
       }
     } catch (error) {
-      console.error("Error updating status:", error);
       toast.error("Failed to update status. Please try again.");
     }
   };
 
   const handleUpvote = async (reportId: string) => {
+    if (votedReports.includes(reportId)) {
+      toast.error("You have already verified/upvoted this report!");
+      return;
+    }
+
     try {
       const docRef = doc(db, "reports", reportId);
-      
+      let earnedCoins = false;
+
       await runTransaction(db, async (transaction) => {
         const reportSnap = await transaction.get(docRef);
         if (!reportSnap.exists()) return;
@@ -153,10 +257,10 @@ export default function Dashboard() {
         const currentUpvotes = typeof reportData.upvotes === "number" ? reportData.upvotes : 0;
         const newUpvotes = currentUpvotes + 1;
         
-        const reportUpdates: any = { upvotes: newUpvotes };
+        const reportUpdates: any = { upvotes: increment(1) };
         
-        // Check if report reaches 3 or more upvotes for the first time and has reporterUid
-        if (newUpvotes >= 3 && !reportData.upvoteRewardCredited && reportData.reporterUid) {
+        const isAlreadyCredited = reportData.upvoteRewardGiven || reportData.upvoteRewardCredited;
+        if (newUpvotes >= 3 && !isAlreadyCredited && reportData.reporterUid) {
           const reporterUid = reportData.reporterUid;
           const citizenRef = doc(db, "citizens", reporterUid);
           const citizenSnap = await transaction.get(citizenRef);
@@ -171,7 +275,6 @@ export default function Dashboard() {
               updatedAt: new Date().toISOString()
             });
             
-            // Record the transaction subcollection document
             const transactionsCollectionRef = collection(db, "citizens", reporterUid, "transactions");
             const newTxRef = doc(transactionsCollectionRef);
             transaction.set(newTxRef, {
@@ -181,17 +284,123 @@ export default function Dashboard() {
               reportId
             });
             
+            reportUpdates.upvoteRewardGiven = true;
             reportUpdates.upvoteRewardCredited = true;
+            earnedCoins = true;
           }
         }
         
         transaction.update(docRef, reportUpdates);
       });
       
-      toast.success("Civic report verified/upvoted! 👍");
+      const newVoted = [...votedReports, reportId];
+      setVotedReports(newVoted);
+      localStorage.setItem("citylens_voted_reports", JSON.stringify(newVoted));
+
+      if (earnedCoins) {
+        toast.success("Community Verified! +25 GreenCoins awarded to reporter! 🏆");
+      } else {
+        toast.success("Civic report verified/upvoted! 👍");
+      }
     } catch (error) {
-      console.error("Upvoting error:", error);
       toast.error("Could not register upvote.");
+    }
+  };
+
+  const handleVerifyResolution = async () => {
+    if (!afterImageFile || !selectedReportForResolution) {
+      toast.error("Please select an 'after' photo to verify.");
+      return;
+    }
+
+    setIsVerifyingResolution(true);
+    setResolutionResult(null);
+
+    try {
+      const base64Data = await fileToBase64(afterImageFile);
+      const res = await fetch("/api/resolve", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          afterImageBase64: base64Data,
+          mimeType: afterImageFile.type,
+          originalReport: {
+            title: selectedReportForResolution.analysis.title,
+            category: selectedReportForResolution.analysis.category,
+            description: selectedReportForResolution.analysis.description,
+            severity: selectedReportForResolution.analysis.severity,
+          },
+        }),
+      });
+
+      if (!res.ok) {
+        const errorJson = await res.json();
+        throw new Error(errorJson.error || "Failed to verify resolution");
+      }
+
+      const data = await res.json();
+      setResolutionResult(data.resolution);
+      toast.success("AI verification complete!");
+    } catch (error: any) {
+      toast.error(error.message || "Failed to verify resolution. Please try again.");
+    } finally {
+      setIsVerifyingResolution(false);
+    }
+  };
+
+  const handleMarkAsResolved = async (reportId: string, reporterUid?: string | null) => {
+    try {
+      const docRef = doc(db, "reports", reportId);
+      
+      await runTransaction(db, async (transaction) => {
+        const reportSnap = await transaction.get(docRef);
+        if (!reportSnap.exists()) return;
+        
+        const reportData = reportSnap.data();
+        if (reportData.status === "Resolved") {
+          return;
+        }
+        
+        transaction.update(docRef, { status: "Resolved" });
+        
+        if (reporterUid && !reportData.resolvedRewardCredited) {
+          const citizenRef = doc(db, "citizens", reporterUid);
+          const citizenSnap = await transaction.get(citizenRef);
+          
+          if (citizenSnap.exists()) {
+            const citizenData = citizenSnap.data();
+            const currentCoins = typeof citizenData.greenCoins === "number" ? citizenData.greenCoins : 0;
+            const newCoins = currentCoins + 50;
+            
+            transaction.update(citizenRef, {
+              greenCoins: newCoins,
+              updatedAt: new Date().toISOString()
+            });
+            
+            const transactionsCollectionRef = collection(db, "citizens", reporterUid, "transactions");
+            const newTxRef = doc(transactionsCollectionRef);
+            transaction.set(newTxRef, {
+              amount: 50,
+              reason: "Issue Resolved",
+              timestamp: new Date().toISOString(),
+              reportId: reportId
+            });
+            
+            transaction.update(docRef, { resolvedRewardCredited: true });
+          }
+        }
+      });
+
+      toast.success("Issue marked as Resolved! +50 GreenCoins awarded to reporter! 🏆");
+      setIsResolveModalOpen(false);
+      setSelectedReportForResolution(null);
+      setAfterImageFile(null);
+      setAfterImagePreview(null);
+      setResolutionResult(null);
+    } catch (error) {
+      toast.error("Failed to mark report as resolved.");
     }
   };
 
@@ -201,20 +410,17 @@ export default function Dashboard() {
         await deleteDoc(doc(db, "reports", id));
         toast.success("Report deleted successfully!");
       } catch (error) {
-        console.error("Error deleting report:", error);
         toast.error("Failed to delete report.");
       }
     }
   };
 
-  // Compute stats
   const totalReports = reports.length;
   const pendingCount = reports.filter((r) => r.status === "Pending").length;
   const inProgressCount = reports.filter((r) => r.status === "In Progress").length;
   const resolvedCount = reports.filter((r) => r.status === "Resolved").length;
   const criticalCount = reports.filter((r) => r.analysis.severity === "Critical").length;
 
-  // Filter lists based on search, severity, and category
   const filteredReports = reports.filter((report) => {
     const matchesSearch = 
       report.analysis.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -222,10 +428,20 @@ export default function Dashboard() {
       report.analysis.department.toLowerCase().includes(searchQuery.toLowerCase());
     
     const matchesSeverity = severityFilter === "All" || report.analysis.severity === severityFilter;
-    
     const matchesCategory = categoryFilter === "All" || report.analysis.category === categoryFilter;
+    const matchesStatus = statusFilter === "All" || report.status === statusFilter;
 
-    return matchesSearch && matchesSeverity && matchesCategory;
+    return matchesSearch && matchesSeverity && matchesCategory && matchesStatus;
+  });
+
+  const sortedReports = [...filteredReports].sort((a, b) => {
+    const isACritical = a.analysis.severity === "Critical";
+    const isBCritical = b.analysis.severity === "Critical";
+    
+    if (isACritical && !isBCritical) return -1;
+    if (!isACritical && isBCritical) return 1;
+    
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
   });
 
   const categories = [
@@ -356,128 +572,389 @@ export default function Dashboard() {
             </div>
           </div>
 
+          {/* Status Filter Tabs */}
+          <div className="flex flex-wrap gap-2 mb-6 pb-4 border-b border-[#2a2520]/60">
+            {(["All", "Pending", "In Progress", "Resolved"] as const).map((status) => {
+              const isActive = statusFilter === status;
+              return (
+                <button
+                  key={status}
+                  type="button"
+                  onClick={() => setStatusFilter(status)}
+                  className={`px-4 py-2 rounded-full text-xs font-semibold tracking-wide transition-all ${
+                    isActive
+                      ? "bg-[#2a1f10] text-amber-500 border border-amber-500/20"
+                      : "bg-[#0f0d0b] text-[#e7e5e4]/70 hover:text-white border border-[#2a2520] hover:bg-[#161310]"
+                  }`}
+                >
+                  {status}
+                </button>
+              );
+            })}
+          </div>
+
           {/* Incident Cards list */}
           {isLoading ? (
             <div className="py-12 text-center text-[#78716c]">
               <div className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-[#78716c] border-t-transparent mb-3"></div>
               <p className="text-sm">Retrieving civic reports from Firestore...</p>
             </div>
-          ) : filteredReports.length === 0 ? (
-            <div className="py-16 text-center text-[#78716c] rounded-xl bg-[#0f0d0b]/40 border border-[#2a2520]">
-              <p className="text-sm">No reported incidents match your search criteria.</p>
+          ) : sortedReports.length === 0 ? (
+            <div className="py-16 text-center text-[#78716c] rounded-xl bg-[#0f0d0b]/40 border border-[#2a2520] flex flex-col items-center justify-center">
+              <AlertOctagon className="h-10 w-10 text-stone-500 mb-3" />
+              <p className="text-sm font-semibold text-stone-300">
+                {statusFilter === "All" ? "No reports found" : `No ${statusFilter} reports found`}
+              </p>
               <p className="text-xs mt-1.5 text-[#78716c]">Be the first to report an issue on the Home page.</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {filteredReports.map((report) => (
-                <div 
-                  key={report.id}
-                  className="rounded-xl border border-[#2a2520] bg-[#0f0d0b] p-5 hover:border-amber-500/20 transition-all flex flex-col justify-between"
-                >
-                  <div>
-                    {/* Badge and state bar */}
-                    <div className="flex items-center justify-between gap-2 flex-wrap mb-3.5">
-                      <div className="flex items-center gap-2">
-                        <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${getSeverityColor(report.analysis.severity)}`}>
-                          {report.analysis.severity}
-                        </span>
-                        <span className="text-[10px] bg-[#161310] text-[#e7e5e4] border border-[#2a2520] px-2 py-0.5 rounded">
-                          {report.analysis.category}
-                        </span>
-                      </div>
-                      {getStatusBadge(report.status)}
-                    </div>
-
-                    {/* Title & Desc */}
-                    <h4 className="text-base font-bold text-[#e7e5e4] mb-1 leading-tight">{report.analysis.title}</h4>
-                    <p className="text-xs text-[#78716c] mb-4 line-clamp-2 leading-relaxed">{report.analysis.description}</p>
-
-                    {/* Location and Reporter info */}
-                    <div className="grid grid-cols-1 gap-2 border-t border-b border-[#2a2520] py-3 mb-4 text-xs">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-start gap-1.5 text-stone-300">
-                          <MapPin className="h-3.5 w-3.5 text-amber-500 mt-0.5 shrink-0" />
-                          <span className="font-medium line-clamp-1">{report.landmark}</span>
+              {sortedReports.map((report) => {
+                const isVoted = votedReports.includes(report.id);
+                const hasWonCommunityBadge = (report.upvotes && report.upvotes >= 3) || !!report.upvoteRewardGiven || !!report.upvoteRewardCredited;
+                
+                return (
+                  <div 
+                    key={report.id}
+                    className="rounded-xl border border-[#2a2520] bg-[#0f0d0b] p-5 hover:border-amber-500/20 transition-all flex flex-col justify-between"
+                  >
+                    <div>
+                      {/* Badge and state bar */}
+                      <div className="flex items-center justify-between gap-2 flex-wrap mb-3.5">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${getSeverityColor(report.analysis.severity)}`}>
+                            {report.analysis.severity}
+                          </span>
+                          <span className="text-[10px] bg-[#161310] text-[#e7e5e4] border border-[#2a2520] px-2 py-0.5 rounded">
+                            {report.analysis.category}
+                          </span>
+                          {hasWonCommunityBadge && (
+                            <span className="inline-flex items-center gap-1 text-[10px] bg-emerald-500/15 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20 font-bold uppercase tracking-wider">
+                              🏆 Community Verified
+                            </span>
+                          )}
                         </div>
-                        
-                        {/* Interactive Upvote / Verify Button */}
-                        <button
-                          type="button"
-                          onClick={() => handleUpvote(report.id)}
-                          className="flex items-center gap-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/20 px-2.5 py-1 text-xs font-semibold transition-all shrink-0"
-                          title="Verify / upvote this report"
-                        >
-                          <ThumbsUp className="h-3.5 w-3.5" />
-                          <span>{report.upvotes || 0}</span>
-                        </button>
+                        {getStatusBadge(report.status)}
                       </div>
-                      <div className="flex items-center gap-1.5 text-[#78716c]">
-                        <User className="h-3.5 w-3.5 text-[#78716c] shrink-0" />
-                        <span>Reported by: <strong className="text-[#e7e5e4] font-medium">{report.reporterName}</strong></span>
-                      </div>
-                    </div>
 
-                    {/* Specific extractions */}
-                    <div className="grid grid-cols-2 gap-2 text-[11px] text-[#78716c] mb-4 bg-[#161310] p-2.5 rounded-lg border border-[#2a2520]">
-                      <div>
-                        <span className="text-[#78716c] block">Department:</span>
-                        <span className="font-semibold text-stone-300 line-clamp-1">{report.analysis.department}</span>
-                      </div>
-                      <div>
-                        <span className="text-[#78716c] block">Est. Repair:</span>
-                        <span className="font-semibold text-stone-300">{report.analysis.estimated_repair_time}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Operational Actions */}
-                  <div className="flex items-center justify-between gap-3 border-t border-[#2a2520] pt-4 mt-2">
-                    <div className="flex items-center gap-2">
-                      {report.status === "Pending" && (
-                        <button
-                          type="button"
-                          onClick={() => handleUpdateStatus(report.id, "In Progress")}
-                          className="flex items-center gap-1 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-xs text-white font-semibold rounded-lg transition-colors"
-                        >
-                          <Wrench className="h-3.5 w-3.5" />
-                          <span>Start Repair</span>
-                        </button>
-                      )}
-                      {report.status === "In Progress" && (
-                        <button
-                          type="button"
-                          onClick={() => handleUpdateStatus(report.id, "Resolved")}
-                          className="flex items-center gap-1 px-3 py-1.5 bg-amber-700 hover:bg-amber-800 text-xs text-white font-semibold rounded-lg transition-colors"
-                        >
-                          <CheckCircle className="h-3.5 w-3.5" />
-                          <span>Mark Resolved</span>
-                        </button>
-                      )}
-                      {report.status === "Resolved" && (
-                        <span className="text-xs text-stone-400 flex items-center gap-1 font-semibold px-2.5 py-1 rounded bg-[#161310] border border-[#2a2520]">
-                          ✓ Resolved & Fixed
+                      {/* Title & Desc */}
+                      <div className="flex items-start justify-between gap-2">
+                        <h4 className="text-base font-bold text-[#e7e5e4] mb-1 leading-tight">{report.analysis.title}</h4>
+                        <span className="text-[10px] text-[#78716c] font-medium shrink-0 bg-[#161310] px-1.5 py-0.5 rounded border border-[#2a2520] flex items-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          {formatRelativeTime(report.createdAt)}
                         </span>
-                      )}
+                      </div>
+                      
+                      <div className="mb-2">
+                        {renderSeverityScoreDots(report.analysis.severity, report.analysis.severity_score)}
+                      </div>
+
+                      <p className="text-xs text-[#78716c] mb-4 line-clamp-2 leading-relaxed">{report.analysis.description}</p>
+
+                      {/* Location and Reporter info */}
+                      <div className="grid grid-cols-1 gap-2 border-t border-b border-[#2a2520] py-3 mb-4 text-xs">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-start gap-1.5 text-stone-300">
+                            <MapPin className="h-3.5 w-3.5 text-amber-500 mt-0.5 shrink-0" />
+                            <span className="font-medium line-clamp-1">{report.landmark}</span>
+                          </div>
+                          
+                          {/* Interactive Upvote / Verify Button */}
+                          <button
+                            type="button"
+                            onClick={() => handleUpvote(report.id)}
+                            className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold transition-all shrink-0 ${
+                              isVoted
+                                ? "text-amber-500 border-amber-500/30 bg-amber-500/5 cursor-default"
+                                : "text-[#78716c] border-[#2a2520] hover:text-stone-300 hover:border-stone-700 bg-stone-900/40"
+                            }`}
+                            title={isVoted ? "You have upvoted this" : "Verify / upvote this report"}
+                          >
+                            <ThumbsUp className="h-3.5 w-3.5" />
+                            <span>{report.upvotes || 0}</span>
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-[#78716c]">
+                          <User className="h-3.5 w-3.5 text-[#78716c] shrink-0" />
+                          <span>Reported by: <strong className="text-[#e7e5e4] font-medium">{report.reporterName}</strong></span>
+                        </div>
+                      </div>
+
+                      {/* Specific extractions */}
+                      <div className="grid grid-cols-2 gap-2 text-[11px] text-[#78716c] mb-4 bg-[#161310] p-2.5 rounded-lg border border-[#2a2520]">
+                        <div>
+                          <span className="text-[#78716c] block">Department:</span>
+                          <span className="font-semibold text-stone-300 line-clamp-1">🏢 {report.analysis.department}</span>
+                        </div>
+                        <div>
+                          <span className="text-[#78716c] block">Est. Repair:</span>
+                          <span className="font-semibold text-stone-300">⏳ {report.analysis.estimated_repair_time}</span>
+                        </div>
+                      </div>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteReport(report.id)}
-                      className="text-[#78716c] hover:text-red-500 p-2 rounded-lg hover:bg-red-500/10 transition-all"
-                      title="Delete report from Firestore"
-                      id={`delete-report-btn-${report.id}`}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
+                    {/* Operational Actions */}
+                    <div className="flex items-center justify-between gap-3 border-t border-[#2a2520] pt-4 mt-2">
+                      <div className="flex items-center gap-2">
+                        {report.status === "Pending" && (
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateStatus(report.id, "In Progress")}
+                            className="flex items-center gap-1 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-xs text-white font-semibold rounded-lg transition-colors"
+                          >
+                            <Wrench className="h-3.5 w-3.5" />
+                            <span>Start Repair</span>
+                          </button>
+                        )}
+                        {report.status === "In Progress" && (
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedReportForResolution(report);
+                                setIsResolveModalOpen(true);
+                                setAfterImageFile(null);
+                                setAfterImagePreview(null);
+                                setResolutionResult(null);
+                              }}
+                              className="flex items-center gap-1 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-xs text-white font-semibold rounded-lg transition-colors"
+                            >
+                              <Sparkles className="h-3.5 w-3.5" />
+                              <span>Verify Resolution</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateStatus(report.id, "Resolved")}
+                              className="flex items-center gap-1 px-3 py-1.5 bg-stone-800 hover:bg-stone-700 text-xs text-[#e7e5e4] font-semibold rounded-lg transition-colors border border-[#2a2520]"
+                            >
+                              <CheckCircle className="h-3.5 w-3.5" />
+                              <span>Mark Resolved</span>
+                            </button>
+                          </div>
+                        )}
+                        {report.status === "Resolved" && (
+                          <span className="text-xs text-stone-400 flex items-center gap-1 font-semibold px-2.5 py-1 rounded bg-[#161310] border border-[#2a2520]">
+                            ✓ Resolved & Fixed
+                          </span>
+                        )}
+                      </div>
 
-                </div>
-              ))}
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteReport(report.id)}
+                        className="text-[#78716c] hover:text-red-500 p-2 rounded-lg hover:bg-red-500/10 transition-all"
+                        title="Delete report from Firestore"
+                        id={`delete-report-btn-${report.id}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+
+                  </div>
+                );
+              })}
             </div>
           )}
 
         </div>
       </section>
+
+      {/* Resolution Verification Modal */}
+      {isResolveModalOpen && selectedReportForResolution && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0f0d0b]/80 backdrop-blur-sm">
+          <div 
+            className="w-full max-w-xl rounded-2xl border border-[#2a2520] bg-[#161310] p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-[#2a2520] pb-4 mb-4">
+              <div>
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <Sparkles className="h-5 w-5 text-amber-500 animate-pulse" />
+                  <span>Verify Resolution with AI</span>
+                </h3>
+                <p className="text-xs text-[#78716c] mt-0.5">
+                  Analyze and verify work completion for: <span className="text-stone-300 font-semibold">{selectedReportForResolution.analysis.title}</span>
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setIsResolveModalOpen(false);
+                  setSelectedReportForResolution(null);
+                  setAfterImageFile(null);
+                  setAfterImagePreview(null);
+                  setResolutionResult(null);
+                }}
+                className="text-[#78716c] hover:text-white p-1 rounded-lg hover:bg-white/5 transition-all"
+                id="close-resolution-modal-btn"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="space-y-4">
+              {/* Image upload preview area */}
+              {!afterImagePreview ? (
+                <div className="border-2 border-dashed border-[#2a2520] rounded-xl p-8 text-center hover:border-amber-500/30 transition-colors bg-[#0f0d0b]/30">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    id="after-image-upload"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        setAfterImageFile(file);
+                        setAfterImagePreview(URL.createObjectURL(file));
+                      }
+                    }}
+                  />
+                  <label htmlFor="after-image-upload" className="cursor-pointer flex flex-col items-center">
+                    <Wrench className="h-10 w-10 text-amber-500 mb-3" />
+                    <span className="text-xs font-semibold text-stone-300 block mb-1">
+                      Upload "After Fix" Photo
+                    </span>
+                    <span className="text-[10px] text-[#78716c]">
+                      Drag and drop or click to browse image
+                    </span>
+                  </label>
+                </div>
+              ) : (
+                <div className="relative rounded-xl border border-[#2a2520] overflow-hidden bg-[#0f0d0b]">
+                  <img
+                    src={afterImagePreview}
+                    alt="After fix"
+                    className="w-full h-48 object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAfterImageFile(null);
+                      setAfterImagePreview(null);
+                      setResolutionResult(null);
+                    }}
+                    className="absolute top-2 right-2 p-1.5 rounded-full bg-black/60 text-stone-300 hover:text-white transition-colors"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+
+              {/* Action Button */}
+              {afterImagePreview && !resolutionResult && (
+                <button
+                  type="button"
+                  disabled={isVerifyingResolution}
+                  onClick={handleVerifyResolution}
+                  className="w-full py-2.5 px-4 bg-amber-600 hover:bg-amber-700 disabled:bg-amber-800/40 text-xs font-semibold text-white rounded-xl transition-all flex items-center justify-center gap-2"
+                >
+                  {isVerifyingResolution ? (
+                    <>
+                      <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                      <span>AI is verifying the fix...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-3.5 w-3.5" />
+                      <span>Verify with AI</span>
+                    </>
+                  )}
+                </button>
+              )}
+
+              {/* Resolution Result Card */}
+              {resolutionResult && (
+                <div className="rounded-xl border border-[#2a2520] bg-[#0f0d0b] p-4 space-y-3">
+                  <div className="flex items-center justify-between border-b border-[#2a2520] pb-2.5">
+                    <div className="flex items-center gap-1.5">
+                      {resolutionResult.isResolved ? (
+                        <CheckCircle className="h-5 w-5 text-emerald-500" />
+                      ) : (
+                        <XCircle className="h-5 w-5 text-red-500" />
+                      )}
+                      <span className="text-xs font-bold text-stone-200">
+                        {resolutionResult.isResolved ? "Issue Genuinely Resolved" : "Issue Unresolved/Incomplete"}
+                      </span>
+                    </div>
+                    <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border ${
+                      resolutionResult.fixQuality === "Complete"
+                        ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/20"
+                        : resolutionResult.fixQuality === "Partial"
+                        ? "bg-amber-500/15 text-amber-400 border-amber-500/20"
+                        : "bg-red-500/15 text-red-400 border-red-500/20"
+                    }`}>
+                      {resolutionResult.fixQuality} Fix
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4 text-xs">
+                    <div>
+                      <span className="text-[#78716c] block text-[10px] uppercase font-bold tracking-wider mb-0.5">Confidence Score:</span>
+                      <span className="text-[#e7e5e4] font-semibold">{(resolutionResult.confidence * 100).toFixed(0)}%</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <span className="text-[#78716c] block text-[10px] uppercase font-bold tracking-wider mb-1">AI Verification Details:</span>
+                    <p className="text-xs text-stone-300 leading-relaxed bg-[#161310] p-2.5 rounded-lg border border-[#2a2520]">
+                      {resolutionResult.verificationSummary}
+                    </p>
+                  </div>
+
+                  {resolutionResult.remainingConcerns && resolutionResult.remainingConcerns.length > 0 && (
+                    <div>
+                      <span className="text-red-400 block text-[10px] uppercase font-bold tracking-wider mb-1 flex items-center gap-1">
+                        <AlertTriangle className="h-3.5 w-3.5" />
+                        Remaining Concerns:
+                      </span>
+                      <ul className="list-disc pl-4 text-xs text-stone-400 space-y-1">
+                        {resolutionResult.remainingConcerns.map((concern, idx) => (
+                          <li key={idx}>{concern}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Actions based on resolution */}
+                  {resolutionResult.isResolved && resolutionResult.fixQuality === "Complete" ? (
+                    <div className="pt-3 border-t border-[#2a2520]">
+                      <button
+                        type="button"
+                        onClick={() => handleMarkAsResolved(selectedReportForResolution.id, selectedReportForResolution.reporterUid)}
+                        className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-xs font-semibold text-white rounded-xl transition-all flex items-center justify-center gap-2"
+                      >
+                        <Award className="h-4 w-4" />
+                        <span>Mark as Resolved & Award +50 GreenCoins</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="pt-3 border-t border-[#2a2520] text-center">
+                      <p className="text-xs text-orange-400 font-semibold mb-2">
+                        Keep In Progress — Fix is incomplete or unverified.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsResolveModalOpen(false);
+                          setSelectedReportForResolution(null);
+                          setAfterImageFile(null);
+                          setAfterImagePreview(null);
+                          setResolutionResult(null);
+                        }}
+                        className="w-full py-2 px-4 bg-stone-800 hover:bg-stone-700 text-xs font-semibold text-stone-300 rounded-xl transition-all"
+                      >
+                        Back to Feed
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

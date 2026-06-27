@@ -287,3 +287,94 @@ async function startServer() {
 startServer().catch((err) => {
   console.error("Failed to start full-stack server:", err);
 });
+
+// ─── RESOLUTION AGENT ──────────────────────────────────────────────────────────
+app.post("/api/resolve", async (req, res): Promise<any> => {
+  try {
+    const { afterImageBase64, mimeType, originalReport } = req.body;
+
+    if (!afterImageBase64 || !originalReport) {
+      return res.status(400).json({ error: "Missing image or original report data" });
+    }
+
+    const geminiApiKey = process.env.GEMINI_API_KEY;
+    if (!geminiApiKey) {
+      return res.status(500).json({ error: "Gemini API key not configured" });
+    }
+
+    const ai = new GoogleGenAI({
+      apiKey: geminiApiKey,
+      httpOptions: { headers: { "User-Agent": "aistudio-build" } },
+    });
+
+    const imagePart = {
+      inlineData: {
+        mimeType: mimeType || "image/jpeg",
+        data: afterImageBase64,
+      },
+    };
+
+    const promptString = `You are an AI civic resolution verifier for India.
+You are given details of a reported civic issue and an after photo submitted by a citizen claiming the issue is resolved.
+
+Original Issue:
+- Title: ${originalReport.title}
+- Category: ${originalReport.category}
+- Description: ${originalReport.description}
+- Severity: ${originalReport.severity}
+
+Analyze the after photo and determine if the issue is genuinely resolved.
+Return ONLY valid JSON with no markdown or backticks.`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [imagePart, { text: promptString }],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            isResolved: { type: Type.BOOLEAN },
+            fixQuality: {
+              type: Type.STRING,
+              description: "Must be: Poor | Partial | Complete",
+            },
+            confidence: { type: Type.NUMBER },
+            verificationSummary: { type: Type.STRING },
+            remainingConcerns: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+            },
+          },
+          required: ["isResolved", "fixQuality", "confidence", "verificationSummary", "remainingConcerns"],
+        },
+      },
+    });
+
+    const textOutput = response.text;
+    if (!textOutput) throw new Error("No response from Gemini");
+
+    try {
+      const cleaned = textOutput.trim()
+        .replace(/^```json\s*/i, "")
+        .replace(/^```\s*/i, "")
+        .replace(/```\s*$/i, "")
+        .trim();
+      const parsedData = JSON.parse(cleaned);
+      return res.json({ verification: parsedData });
+    } catch {
+      return res.json({
+        verification: {
+          isResolved: false,
+          fixQuality: "Poor",
+          confidence: 0.3,
+          verificationSummary: "Could not verify resolution automatically.",
+          remainingConcerns: ["Manual inspection recommended"],
+        },
+      });
+    }
+  } catch (error: any) {
+    console.error("Error in /api/resolve endpoint:", error);
+    return res.status(500).json({ error: error.message || "Internal server error during resolution verification" });
+  }
+});
