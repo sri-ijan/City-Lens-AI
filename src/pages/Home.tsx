@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React from "react";
 import ReportForm from "../components/ReportForm";
 
 export default function Home() {

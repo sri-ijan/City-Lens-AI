@@ -22,8 +22,7 @@ interface ReportDocument {
 }
 
 const GOOGLE_MAPS_API_KEY =
-  (import.meta as any).env?.VITE_GOOGLE_MAPS_PLATFORM_KEY ||
-  "AIzaSyDu_ofjnm8vm7hWXrF_SI1nxVbblXi1sHI";
+  (import.meta as any).env?.VITE_GOOGLE_MAPS_PLATFORM_KEY || "AIzaSyDu_ofjnm8vm7hWXrF_SI1nxVbblXi1sHI";
 
 const containerStyle = {
   width: "100%",

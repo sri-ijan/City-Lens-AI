@@ -32,8 +32,26 @@ import {
   AlertTriangle,
   Sparkles,
   X,
-  Award
+  Award,
+  Brain,
+  TrendingUp
 } from "lucide-react";
+
+interface CivicInsight {
+  title: string;
+  description: string;
+  type: "hotspot" | "trend" | "escalation" | "prediction";
+  severity: "info" | "warning" | "critical";
+  affectedArea: string;
+  recommendedAction: string;
+}
+
+interface CityInsights {
+  insights: CivicInsight[];
+  summary: string;
+  criticalCount: number;
+  mostAffectedCategory: string;
+}
 
 interface ReportDocument {
   id: string;
@@ -121,6 +139,11 @@ export default function Dashboard() {
   const { user } = useAuth();
   const [reports, setReports] = useState<ReportDocument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // City Intelligence Insights State
+  const [insights, setInsights] = useState<CityInsights | null>(null);
+  const [isLoadingInsights, setIsLoadingInsights] = useState(false);
+  const [insightsError, setInsightsError] = useState<string | null>(null);
   
   // Filtering and Searching State
   const [searchQuery, setSearchQuery] = useState("");
@@ -415,6 +438,30 @@ export default function Dashboard() {
     }
   };
 
+  const generateInsights = async () => {
+    if (reports.length === 0) {
+      toast.error("No reports available to analyze.");
+      return;
+    }
+    setIsLoadingInsights(true);
+    setInsightsError(null);
+    try {
+      const response = await fetch("/api/insights", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reports }),
+      });
+      const data = await response.json();
+      if (data.error) throw new Error(data.error);
+      setInsights(data.insights);
+    } catch (error: any) {
+      setInsightsError(error.message || "Failed to generate insights");
+      toast.error("Could not generate city insights.");
+    } finally {
+      setIsLoadingInsights(false);
+    }
+  };
+
   const totalReports = reports.length;
   const pendingCount = reports.filter((r) => r.status === "Pending").length;
   const inProgressCount = reports.filter((r) => r.status === "In Progress").length;
@@ -509,6 +556,162 @@ export default function Dashboard() {
               <span className="text-2xl font-bold text-red-500">{criticalCount}</span>
             </div>
           </div>
+        </div>
+      </section>
+
+      {/* City Intelligence Section */}
+      <section className="max-w-6xl mx-auto px-4 mb-8">
+        <div className="rounded-2xl border border-[#2a2520] bg-[#161310] p-6 shadow-xl">
+          {/* Header */}
+          <div className="flex items-center justify-between gap-4 border-b border-[#2a2520] pb-4 mb-4">
+            <div className="flex items-start gap-2.5">
+              <Brain className="h-5 w-5 text-amber-500 mt-0.5" />
+              <div>
+                <h3 className="text-base font-bold text-white">City Intelligence</h3>
+                <p className="text-xs text-[#78716c] font-medium">
+                  Powered by Gemini Insight Agent
+                </p>
+              </div>
+            </div>
+            {insights && (
+              <button
+                type="button"
+                disabled={isLoadingInsights}
+                onClick={generateInsights}
+                className="px-3 py-1.5 bg-[#2a1f10] hover:bg-[#3d2a15] text-amber-500 hover:text-amber-400 text-xs font-semibold rounded-lg border border-amber-500/10 transition-colors flex items-center gap-1.5 shrink-0 cursor-pointer"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                <span>Regenerate AI Report</span>
+              </button>
+            )}
+          </div>
+
+          {/* Body states */}
+          {isLoadingInsights ? (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 text-xs text-[#78716c] animate-pulse">
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#78716c] border-t-transparent"></div>
+                <span>Gemini is analyzing civic patterns...</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} className="bg-[#0f0d0b] border border-[#2a2520] rounded-xl p-4 space-y-2 animate-pulse">
+                    <div className="h-4 bg-[#161310] rounded w-1/3"></div>
+                    <div className="h-3 bg-[#161310] rounded w-full"></div>
+                    <div className="h-3 bg-[#161310] rounded w-2/3"></div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : insightsError ? (
+            <div className="p-6 rounded-xl bg-red-950/20 border border-red-900/50 text-center space-y-3">
+              <AlertTriangle className="h-8 w-8 text-red-500 mx-auto" />
+              <p className="text-xs text-red-400 font-medium">{insightsError}</p>
+              <button
+                type="button"
+                onClick={generateInsights}
+                className="px-3 py-1.5 bg-red-900/20 hover:bg-red-900/30 text-red-400 text-xs font-semibold rounded-lg border border-red-500/20 transition-all cursor-pointer"
+              >
+                Retry Analysis
+              </button>
+            </div>
+          ) : !insights ? (
+            /* Empty state (before first click) */
+            <div className="py-8 text-center max-w-md mx-auto space-y-4">
+              <div className="h-12 w-12 rounded-full bg-[#2a1f10] border border-amber-500/15 flex items-center justify-center mx-auto text-amber-500">
+                <Brain className="h-6 w-6" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-[#e7e5e4]">Run AI Analysis</p>
+                <p className="text-xs text-[#78716c] mt-1 leading-relaxed">
+                  Analyze civic patterns, detect hotspots, and map predictive escalation risks across all municipal reports.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={generateInsights}
+                className="px-4 py-2 bg-[#92400e] hover:bg-amber-700 text-white text-xs font-bold rounded-lg transition-all shadow-md inline-flex items-center gap-2 cursor-pointer"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                <span>Generate City Intelligence</span>
+              </button>
+            </div>
+          ) : (
+            /* Loaded State */
+            <div className="space-y-4">
+              <p className="text-xs text-stone-300 leading-relaxed bg-[#0f0d0b] p-3 rounded-xl border border-[#2a2520]">
+                {insights.summary}
+              </p>
+
+              {/* Badges/Metrics cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="bg-[#0f0d0b] border border-[#2a2520] rounded-xl p-3 flex flex-col justify-between">
+                  <span className="text-[10px] text-[#78716c] uppercase font-bold tracking-wider">Critical Threats Detected</span>
+                  <span className="text-lg font-bold text-red-400 mt-1">{insights.criticalCount}</span>
+                </div>
+                <div className="bg-[#0f0d0b] border border-[#2a2520] rounded-xl p-3 flex flex-col justify-between">
+                  <span className="text-[10px] text-[#78716c] uppercase font-bold tracking-wider">Most Impacted Category</span>
+                  <span className="text-lg font-bold text-amber-500 mt-1">{insights.mostAffectedCategory}</span>
+                </div>
+              </div>
+
+              {/* Insights grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {insights.insights.map((insight, idx) => {
+                  // Icon choice
+                  let IconComponent = MapPin;
+                  let iconColor = "text-amber-500";
+                  if (insight.type === "trend") {
+                    IconComponent = TrendingUp;
+                    iconColor = "text-blue-400";
+                  } else if (insight.type === "escalation") {
+                    IconComponent = AlertTriangle;
+                    iconColor = "text-orange-500";
+                  } else if (insight.type === "prediction") {
+                    IconComponent = Sparkles;
+                    iconColor = "text-stone-400";
+                  }
+
+                  // Left border color based on severity
+                  let severityBorder = "border-l-2 border-stone-600";
+                  if (insight.severity === "critical") {
+                    severityBorder = "border-l-2 border-red-500";
+                  } else if (insight.severity === "warning") {
+                    severityBorder = "border-l-2 border-amber-500";
+                  }
+
+                  return (
+                    <div
+                      key={idx}
+                      className={`bg-[#0f0d0b] border border-[#2a2520] rounded-xl p-4 flex flex-col justify-between space-y-3 hover:border-amber-500/10 transition-all ${severityBorder}`}
+                    >
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <IconComponent className={`h-4 w-4 ${iconColor}`} />
+                          <span className={`text-[10px] uppercase font-bold tracking-wider ${iconColor}`}>
+                            {insight.type}
+                          </span>
+                        </div>
+                        <h4 className="text-sm font-bold text-white leading-snug">{insight.title}</h4>
+                        <p className="text-xs text-[#78716c] leading-relaxed">{insight.description}</p>
+                      </div>
+
+                      <div className="border-t border-[#2a2520]/60 pt-2.5 space-y-1 text-[11px]">
+                        <div>
+                          <span className="text-[#78716c]">Affected Area: </span>
+                          <span className="text-stone-300 font-medium">{insight.affectedArea}</span>
+                        </div>
+                        <div>
+                          <span className="text-[#78716c]">Recommended: </span>
+                          <span className="text-amber-500/90 font-medium">{insight.recommendedAction}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </section>
 

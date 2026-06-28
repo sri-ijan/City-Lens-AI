@@ -13,7 +13,7 @@ const PORT = parseInt(process.env.PORT || "3000", 10);
 // Set up JSON body parser with increased limit to handle base64 image uploads
 app.use(express.json({ limit: "15mb" }));
 
-// ─── VISION AGENT ──────────────────────────────────────────────────────────────
+// API endpoint to analyze a civic issue image
 app.post("/api/analyze", async (req, res): Promise<any> => {
   try {
     const { imageBase64, mimeType } = req.body;
@@ -31,7 +31,11 @@ app.post("/api/analyze", async (req, res): Promise<any> => {
 
     const ai = new GoogleGenAI({
       apiKey: geminiApiKey,
-      httpOptions: { headers: { "User-Agent": "aistudio-build" } },
+      httpOptions: {
+        headers: {
+          "User-Agent": "aistudio-build",
+        },
+      },
     });
 
     const imagePart = {
@@ -47,17 +51,81 @@ Analyze the uploaded image and return ONLY valid raw JSON representing the ident
 Rules:
 * Be factual and precise.
 * Describe only visible evidence.
-* Identify specific hazards, local municipal departments in India (e.g., PWD, BBMP, Jal Board, BESCOM, MCD, local ward office, etc.), and realistic repair times.
-* Return JSON with exactly these fields: category, severity, severity_score, confidence, title, description, hazards, department, recommended_action, estimated_repair_time
-* category must be one of: Pothole | Water Leakage | Broken Streetlight | Garbage Dumping | Damaged Road | Encroachment | Drainage Issue | Other
-* severity must be one of: Low | Medium | High | Critical
-* severity_score is integer 1-10
-* confidence is float 0.0-1.0
-* hazards is array of strings`;
+* Identify specific hazards, local municipal departments in India (e.g., PWD, BBMP, Jal Board, BESCOM, MCD, local ward office, etc.), and realistic repair times.`;
 
+    // Call the model using generateContent with a strict schema to guarantee valid JSON
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: [imagePart, { text: promptString }],
+      model: "gemini-2.0-flash-lite",
+      contents: [imagePart, promptString],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            category: {
+              type: Type.STRING,
+              description:
+                "Must be: Pothole | Water Leakage | Broken Streetlight | Garbage Dumping | Damaged Road | Encroachment | Drainage Issue | Other",
+            },
+            severity: {
+              type: Type.STRING,
+              description: "Must be: Low | Medium | High | Critical",
+            },
+            severity_score: {
+              type: Type.INTEGER,
+              description: "Score out of 10 representing risk (1-10)",
+            },
+            confidence: {
+              type: Type.NUMBER,
+              description:
+                "A confidence score from 0.0 to 1.0 representing the AI certainty",
+            },
+            title: {
+              type: Type.STRING,
+              description:
+                "A brief, clear title for the reported issue (e.g., Large pothole near water drain)",
+            },
+            description: {
+              type: Type.STRING,
+              description:
+                "A factual, detailed summary describing only what is visually evident in the image",
+            },
+            hazards: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+              description:
+                "An array of specific physical or environmental hazards identified",
+            },
+            department: {
+              type: Type.STRING,
+              description:
+                "The specific Indian civic department responsible (e.g., Public Works Department (PWD), Municipal Corporation, State Electricity Board, Jal Board)",
+            },
+            recommended_action: {
+              type: Type.STRING,
+              description:
+                "A concrete, actionable recommendation to resolve the issue safely",
+            },
+            estimated_repair_time: {
+              type: Type.STRING,
+              description:
+                "Reasonable timeline for resolving the issue (e.g., '24 Hours', '2-3 Days', '1 Week', '2 Weeks')",
+            },
+          },
+          required: [
+            "category",
+            "severity",
+            "severity_score",
+            "confidence",
+            "title",
+            "description",
+            "hazards",
+            "department",
+            "recommended_action",
+            "estimated_repair_time",
+          ],
+        },
+      },
     });
 
     const textOutput = response.text;
@@ -65,6 +133,7 @@ Rules:
       throw new Error("No response text received from Gemini");
     }
 
+    // Try parsing the returned response
     try {
       const cleaned = textOutput
         .trim()
@@ -72,7 +141,8 @@ Rules:
         .replace(/^```\s*/i, "")
         .replace(/```\s*$/i, "")
         .trim();
-      const parsedData = JSON.parse(cleaned);
+      const parsedData = JSON.parse(cleaned); // ✅
+
       return res.json({ analysis: parsedData });
     } catch (parseError) {
       console.error(
@@ -80,6 +150,8 @@ Rules:
         textOutput,
         parseError,
       );
+
+      // Fallback object matching the required schema
       const fallback = {
         category: "Other",
         severity: "Medium",
@@ -97,46 +169,22 @@ Rules:
     }
   } catch (error: any) {
     console.error("Error in /api/analyze endpoint:", error);
-
-    if (error.status === 429) {
-      return res.json({
-        analysis: {
-          category: "Other",
-          severity: "Medium",
-          severity_score: 5,
-          confidence: 0.5,
-          title: "AI Service Temporarily Busy",
-          description:
-            "Gemini quota is temporarily unavailable. Please retry later.",
-          hazards: [],
-          department: "Local Municipal Corporation",
-          recommended_action:
-            "Please retry in a minute or submit the report manually.",
-          estimated_repair_time: "Unknown",
-        },
-      });
-    }
-
-    return res
-      .status(500)
-      .json({
-        error: error.message || "Internal server error during analysis",
-      });
+    return res.status(500).json({
+      error: error.message || "Internal server error during analysis",
+    });
   }
 });
 
-// ─── COMPLAINT AGENT ───────────────────────────────────────────────────────────
+// API endpoint to generate a formal municipal complaint letter
 app.post("/api/complaint", async (req, res): Promise<any> => {
   try {
     const { issueType, location, description, reporterName, dateOfIncident } =
       req.body;
 
     if (!issueType || !location || !description) {
-      return res
-        .status(400)
-        .json({
-          error: "Missing required fields (issueType, location, description)",
-        });
+      return res.status(400).json({
+        error: "Missing required fields (issueType, location, description)",
+      });
     }
 
     const geminiApiKey = process.env.GEMINI_API_KEY;
@@ -148,7 +196,11 @@ app.post("/api/complaint", async (req, res): Promise<any> => {
 
     const ai = new GoogleGenAI({
       apiKey: geminiApiKey,
-      httpOptions: { headers: { "User-Agent": "aistudio-build" } },
+      httpOptions: {
+        headers: {
+          "User-Agent": "aistudio-build",
+        },
+      },
     });
 
     const promptString = `You are an expert civic legal advisor and public advocate in India.
@@ -167,7 +219,7 @@ The letter should:
 4. DO NOT use markdown headers, bold headers or code blocks. Just return the pure plain text of the letter.`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+     model: "gemini-2.0-flash-lite",
       contents: promptString,
     });
 
@@ -179,16 +231,14 @@ The letter should:
     return res.json({ complaint: textOutput.trim() });
   } catch (error: any) {
     console.error("Error in /api/complaint endpoint:", error);
-    return res
-      .status(500)
-      .json({
-        error:
-          error.message || "Internal server error during complaint generation",
-      });
+    return res.status(500).json({
+      error:
+        error.message || "Internal server error during complaint generation",
+    });
   }
 });
 
-// ─── ROUTING AGENT ─────────────────────────────────────────────────────────────
+// API endpoint for server-side Routing Agent
 app.post("/api/route", async (req, res): Promise<any> => {
   try {
     const { category, severity, location } = req.body;
@@ -208,7 +258,11 @@ app.post("/api/route", async (req, res): Promise<any> => {
 
     const ai = new GoogleGenAI({
       apiKey: geminiApiKey,
-      httpOptions: { headers: { "User-Agent": "aistudio-build" } },
+      httpOptions: {
+        headers: {
+          "User-Agent": "aistudio-build",
+        },
+      },
     });
 
     const promptString = `You are an AI civic routing agent for India.
@@ -222,13 +276,13 @@ Analyze and determine:
 2. A short department code (e.g., PWD, BBMP, DJB, BESCOM, MCD).
 3. The priority level: P1 (Critical/urgent, danger to life/property), P2 (High priority, major disruption), P3 (Medium priority, standard issue), P4 (Low priority, cosmetic/minor).
 4. Estimated days to resolve (a number).
-5. A clear escalation path as an array of strings (e.g., step 1: Ward Engineer, step 2: Assistant Executive Engineer, step 3: Chief Commissioner / Nodal Officer).
+5. A clear escalation path as an array of strings (e.g., step 1: Ward Engineer, step 2: Assistant Executive Engineer, step 3: Chief Commissioner / Nodal Officer, etc. specific to that department).
 6. A quick contact hint (e.g., phone number, email, or app/portal name).
 
 Return ONLY valid raw JSON conforming to the specified schema.`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-2.0-flash-lite",
       contents: promptString,
       config: {
         responseMimeType: "application/json",
@@ -272,7 +326,8 @@ Return ONLY valid raw JSON conforming to the specified schema.`;
         .replace(/^```\s*/i, "")
         .replace(/```\s*$/i, "")
         .trim();
-      const parsedData = JSON.parse(cleaned);
+      const parsedData = JSON.parse(cleaned); // ✅
+
       return res.json({ routing: parsedData });
     } catch (parseError) {
       console.error(
@@ -298,194 +353,69 @@ Return ONLY valid raw JSON conforming to the specified schema.`;
   }
 });
 
-// ─── SERVER START ──────────────────────────────────────────────────────────────
-async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
-  }
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(
-      `[CityLens Server] Running on http://0.0.0.0:${PORT} in ${process.env.NODE_ENV || "development"} mode`,
-    );
-  });
-}
-
-startServer().catch((err) => {
-  console.error("Failed to start full-stack server:", err);
-});
-
-// ─── INSIGHT AGENT ─────────────────────────────────────────────────────────────
-app.post("/api/insights", async (req, res): Promise<any> => {
-  try {
-    const { reports } = req.body;
-
-    if (!reports || !Array.isArray(reports) || reports.length === 0) {
-      return res.status(400).json({ error: "No reports data provided" });
-    }
-
-    const geminiApiKey = process.env.GEMINI_API_KEY;
-    if (!geminiApiKey) {
-      return res.status(500).json({ error: "Gemini API key not configured" });
-    }
-
-    const ai = new GoogleGenAI({
-      apiKey: geminiApiKey,
-      httpOptions: { headers: { "User-Agent": "aistudio-build" } },
-    });
-
-    // Summarize reports for Gemini — don't send full objects
-    const summary = reports.map((r: any) => ({
-      category: r.analysis?.category,
-      severity: r.analysis?.severity,
-      severity_score: r.analysis?.severity_score,
-      department: r.analysis?.department,
-      location: r.landmark,
-      status: r.status,
-      createdAt: r.createdAt,
-    }));
-
-    const promptString = `You are an AI civic intelligence analyst for Indian cities.
-You have been given a dataset of ${reports.length} citizen-reported civic issues.
-
-Dataset:
-${JSON.stringify(summary, null, 2)}
-
-Analyze this data and generate exactly 4 actionable civic insights.
-Each insight must be specific, data-driven, and reference actual patterns in the data.
-
-Return ONLY valid JSON — no markdown, no backticks.`;
-
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: promptString,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            insights: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  title: { type: Type.STRING },
-                  description: { type: Type.STRING },
-                  type: {
-                    type: Type.STRING,
-                    description:
-                      "Must be: hotspot | trend | escalation | prediction",
-                  },
-                  severity: {
-                    type: Type.STRING,
-                    description: "Must be: info | warning | critical",
-                  },
-                  affectedArea: { type: Type.STRING },
-                  recommendedAction: { type: Type.STRING },
-                },
-                required: [
-                  "title",
-                  "description",
-                  "type",
-                  "severity",
-                  "affectedArea",
-                  "recommendedAction",
-                ],
-              },
-            },
-            summary: {
-              type: Type.STRING,
-              description: "One sentence overall city health summary",
-            },
-            criticalCount: { type: Type.INTEGER },
-            mostAffectedCategory: { type: Type.STRING },
-          },
-          required: [
-            "insights",
-            "summary",
-            "criticalCount",
-            "mostAffectedCategory",
-          ],
-        },
-      },
-    });
-
-    const textOutput = response.text;
-    if (!textOutput) throw new Error("No response from Gemini");
-
-    const cleaned = textOutput
-      .trim()
-      .replace(/^```json\s*/i, "")
-      .replace(/^```\s*/i, "")
-      .replace(/```\s*$/i, "")
-      .trim();
-
-    const parsedData = JSON.parse(cleaned);
-    return res.json({ insights: parsedData });
-  } catch (error: any) {
-    console.error("Error in /api/insights endpoint:", error);
-    return res
-      .status(500)
-      .json({
-        error:
-          error.message || "Internal server error during insights generation",
-      });
-  }
-});
-
-// ─── RESOLUTION AGENT ──────────────────────────────────────────────────────────
+// API endpoint for Resolution Verification Agent
 app.post("/api/resolve", async (req, res): Promise<any> => {
   try {
     const { afterImageBase64, mimeType, originalReport } = req.body;
 
     if (!afterImageBase64 || !originalReport) {
-      return res
-        .status(400)
-        .json({ error: "Missing image or original report data" });
+      return res.status(400).json({
+        error: "Missing required fields (afterImageBase64, originalReport)",
+      });
+    }
+
+    const { title, category, description, severity } = originalReport;
+    if (!title || !category || !description || !severity) {
+      return res.status(400).json({
+        error:
+          "Missing original report fields (title, category, description, severity)",
+      });
     }
 
     const geminiApiKey = process.env.GEMINI_API_KEY;
     if (!geminiApiKey) {
-      return res.status(500).json({ error: "Gemini API key not configured" });
+      return res
+        .status(500)
+        .json({ error: "Gemini API key is not configured on the server" });
     }
 
     const ai = new GoogleGenAI({
       apiKey: geminiApiKey,
-      httpOptions: { headers: { "User-Agent": "aistudio-build" } },
+      httpOptions: {
+        headers: {
+          "User-Agent": "aistudio-build",
+        },
+      },
     });
 
     const imagePart = {
       inlineData: {
-        mimeType: mimeType || "image/jpeg",
         data: afterImageBase64,
+        mimeType: mimeType || "image/jpeg",
       },
     };
 
     const promptString = `You are an AI civic resolution verifier for India.
-You are given details of a reported civic issue and an after photo submitted by a citizen claiming the issue is resolved.
+You are given details of a reported civic issue and an 'after' photo submitted by a citizen claiming the issue is resolved.
 
 Original Issue:
-- Title: ${originalReport.title}
-- Category: ${originalReport.category}
-- Description: ${originalReport.description}
-- Severity: ${originalReport.severity}
+- Title: ${title}
+- Category: ${category}  
+- Description: ${description}
+- Severity: ${severity}
 
-Analyze the after photo and determine if the issue is genuinely resolved.
-Return ONLY valid JSON with no markdown or backticks.`;
+Analyze the after photo and determine:
+1. Is the issue genuinely resolved?
+2. Quality of the fix (Poor/Partial/Complete)
+3. Confidence score (0.0-1.0)
+4. What is visible in the after photo
+5. Any remaining concerns
+
+Return ONLY valid JSON.`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: [imagePart, { text: promptString }],
+     model: "gemini-2.0-flash-lite",
+      contents: [imagePart, promptString],
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -494,7 +424,7 @@ Return ONLY valid JSON with no markdown or backticks.`;
             isResolved: { type: Type.BOOLEAN },
             fixQuality: {
               type: Type.STRING,
-              description: "Must be: Poor | Partial | Complete",
+              enum: ["Poor", "Partial", "Complete"],
             },
             confidence: { type: Type.NUMBER },
             verificationSummary: { type: Type.STRING },
@@ -515,7 +445,9 @@ Return ONLY valid JSON with no markdown or backticks.`;
     });
 
     const textOutput = response.text;
-    if (!textOutput) throw new Error("No response from Gemini");
+    if (!textOutput) {
+      throw new Error("No response text received from Gemini");
+    }
 
     try {
       const cleaned = textOutput
@@ -524,27 +456,179 @@ Return ONLY valid JSON with no markdown or backticks.`;
         .replace(/^```\s*/i, "")
         .replace(/```\s*$/i, "")
         .trim();
-      const parsedData = JSON.parse(cleaned);
-      return res.json({ verification: parsedData });
-    } catch {
-      return res.json({
-        verification: {
-          isResolved: false,
-          fixQuality: "Poor",
-          confidence: 0.3,
-          verificationSummary: "Could not verify resolution automatically.",
-          remainingConcerns: ["Manual inspection recommended"],
-        },
-      });
+      const parsedData = JSON.parse(cleaned); // ✅
+
+      return res.json({ resolution: parsedData });
+    } catch (parseError) {
+      console.error(
+        "Failed to parse resolution agent response:",
+        textOutput,
+        parseError,
+      );
+      return res.status(500).json({ error: "Failed to parse AI response" });
     }
   } catch (error: any) {
     console.error("Error in /api/resolve endpoint:", error);
-    return res
-      .status(500)
-      .json({
-        error:
-          error.message ||
-          "Internal server error during resolution verification",
-      });
+    return res.status(500).json({
+      error:
+        error.message || "Internal server error during resolution verification",
+    });
   }
+});
+
+// API endpoint for City Intelligence Insights
+app.post("/api/insights", async (req, res): Promise<any> => {
+  try {
+    const { reports } = req.body;
+
+    if (!reports || !Array.isArray(reports) || reports.length === 0) {
+      return res
+        .status(400)
+        .json({ error: "No reports provided for analysis." });
+    }
+
+    const geminiApiKey = process.env.GEMINI_API_KEY;
+    if (!geminiApiKey) {
+      return res
+        .status(500)
+        .json({ error: "Gemini API key is not configured on the server" });
+    }
+
+    const ai = new GoogleGenAI({
+      apiKey: geminiApiKey,
+      httpOptions: {
+        headers: {
+          "User-Agent": "aistudio-build",
+        },
+      },
+    });
+
+    // Extract relevant brief data to stay within token limits and optimize analysis speed
+    const simplifiedReports = reports.map((r) => ({
+      title: r.analysis?.title || "Untitled",
+      category: r.analysis?.category || "Other",
+      description: r.analysis?.description || "",
+      severity: r.analysis?.severity || "Medium",
+      department: r.analysis?.department || "General",
+      landmark: r.landmark || "Unknown Location",
+      status: r.status || "Pending",
+      createdAt: r.createdAt || "",
+    }));
+
+    const promptString = `You are a City Intelligence Insight Agent.
+Analyze the following list of civic reports submitted by citizens and generate a structured city intelligence report focusing on hotspots, trends, escalation risks, and predictions.
+
+Civic Reports:
+${JSON.stringify(simplifiedReports)}
+
+Analyze the reports and determine:
+1. An overall concise visual summary of the municipal situation and civic patterns (1-2 sentences).
+2. A list of key insights. Ensure each insight represents a true hotspot, trend, escalation, or prediction.
+3. The number of critical severity reports.
+4. The most affected category of issues.
+
+Return ONLY valid JSON matching the requested schema.`;
+
+    const response = await ai.models.generateContent({
+     model: "gemini-2.0-flash-lite",
+      contents: [promptString],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            insights: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  title: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  type: {
+                    type: Type.STRING,
+                    enum: ["hotspot", "trend", "escalation", "prediction"],
+                  },
+                  severity: {
+                    type: Type.STRING,
+                    enum: ["info", "warning", "critical"],
+                  },
+                  affectedArea: { type: Type.STRING },
+                  recommendedAction: { type: Type.STRING },
+                },
+                required: [
+                  "title",
+                  "description",
+                  "type",
+                  "severity",
+                  "affectedArea",
+                  "recommendedAction",
+                ],
+              },
+            },
+            summary: { type: Type.STRING },
+            criticalCount: { type: Type.NUMBER },
+            mostAffectedCategory: { type: Type.STRING },
+          },
+          required: [
+            "insights",
+            "summary",
+            "criticalCount",
+            "mostAffectedCategory",
+          ],
+        },
+      },
+    });
+
+    const textOutput = response.text;
+    if (!textOutput) {
+      throw new Error("No response text received from Gemini");
+    }
+
+    try {
+      const parsedData = JSON.parse(textOutput.trim());
+      return res.json({ insights: parsedData });
+    } catch (parseError) {
+      console.error(
+        "Failed to parse city insights response:",
+        textOutput,
+        parseError,
+      );
+      return res.status(500).json({ error: "Failed to parse AI response" });
+    }
+  } catch (error: any) {
+    console.error("Error in /api/insights endpoint:", error);
+    return res.status(500).json({
+      error:
+        error.message || "Internal server error during insights generation",
+    });
+  }
+});
+
+// Configure Vite middleware or production static files
+async function startServer() {
+  if (process.env.NODE_ENV !== "production") {
+    // In development mode, integrate Vite as middleware
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    // In production mode, serve compiled static files from dist
+    const distPath = path.join(process.cwd(), "dist");
+    app.use(express.static(distPath));
+    app.get("*", (req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
+    });
+  }
+
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(
+      `[CityLens Server] Running on http://0.0.0.0:${PORT} in ${process.env.NODE_ENV || "development"} mode`,
+    );
+  });
+}
+
+startServer().catch((err) => {
+  console.error("Failed to start full-stack server:", err);
 });

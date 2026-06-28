@@ -25,8 +25,8 @@ interface ReportFormProps {
 }
 
 const GOOGLE_MAPS_API_KEY =
-  (import.meta as any).env?.VITE_GOOGLE_MAPS_PLATFORM_KEY ||
-  "AIzaSyDu_ofjnm8vm7hWXrF_SI1nxVbblXi1sHI";
+  (import.meta as any).env?.VITE_GOOGLE_MAPS_PLATFORM_KEY || "AIzaSyDu_ofjnm8vm7hWXrF_SI1nxVbblXi1sHI";
+
 export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
   const { user } = useAuth();
   const [imageFile, setImageFile] = useState<File | null>(null);
