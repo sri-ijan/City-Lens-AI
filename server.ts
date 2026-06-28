@@ -24,7 +24,9 @@ app.post("/api/analyze", async (req, res): Promise<any> => {
 
     const geminiApiKey = process.env.GEMINI_API_KEY;
     if (!geminiApiKey) {
-      return res.status(500).json({ error: "Gemini API key is not configured on the server" });
+      return res
+        .status(500)
+        .json({ error: "Gemini API key is not configured on the server" });
     }
 
     const ai = new GoogleGenAI({
@@ -73,14 +75,19 @@ Rules:
       const parsedData = JSON.parse(cleaned);
       return res.json({ analysis: parsedData });
     } catch (parseError) {
-      console.error("Failed to parse Gemini response text:", textOutput, parseError);
+      console.error(
+        "Failed to parse Gemini response text:",
+        textOutput,
+        parseError,
+      );
       const fallback = {
         category: "Other",
         severity: "Medium",
         severity_score: 5,
         confidence: 0.5,
         title: "Detected Civic Issue",
-        description: "The visual content indicates a possible municipal issue. Details could not be fully parsed automatically.",
+        description:
+          "The visual content indicates a possible municipal issue. Details could not be fully parsed automatically.",
         hazards: ["General public obstruction"],
         department: "Local Municipal Corporation",
         recommended_action: "Inspect the location and review safety protocols.",
@@ -99,31 +106,44 @@ Rules:
           severity_score: 5,
           confidence: 0.5,
           title: "AI Service Temporarily Busy",
-          description: "Gemini quota is temporarily unavailable. Please retry later.",
+          description:
+            "Gemini quota is temporarily unavailable. Please retry later.",
           hazards: [],
           department: "Local Municipal Corporation",
-          recommended_action: "Please retry in a minute or submit the report manually.",
+          recommended_action:
+            "Please retry in a minute or submit the report manually.",
           estimated_repair_time: "Unknown",
         },
       });
     }
 
-    return res.status(500).json({ error: error.message || "Internal server error during analysis" });
+    return res
+      .status(500)
+      .json({
+        error: error.message || "Internal server error during analysis",
+      });
   }
 });
 
 // ─── COMPLAINT AGENT ───────────────────────────────────────────────────────────
 app.post("/api/complaint", async (req, res): Promise<any> => {
   try {
-    const { issueType, location, description, reporterName, dateOfIncident } = req.body;
+    const { issueType, location, description, reporterName, dateOfIncident } =
+      req.body;
 
     if (!issueType || !location || !description) {
-      return res.status(400).json({ error: "Missing required fields (issueType, location, description)" });
+      return res
+        .status(400)
+        .json({
+          error: "Missing required fields (issueType, location, description)",
+        });
     }
 
     const geminiApiKey = process.env.GEMINI_API_KEY;
     if (!geminiApiKey) {
-      return res.status(500).json({ error: "Gemini API key is not configured on the server" });
+      return res
+        .status(500)
+        .json({ error: "Gemini API key is not configured on the server" });
     }
 
     const ai = new GoogleGenAI({
@@ -159,7 +179,12 @@ The letter should:
     return res.json({ complaint: textOutput.trim() });
   } catch (error: any) {
     console.error("Error in /api/complaint endpoint:", error);
-    return res.status(500).json({ error: error.message || "Internal server error during complaint generation" });
+    return res
+      .status(500)
+      .json({
+        error:
+          error.message || "Internal server error during complaint generation",
+      });
   }
 });
 
@@ -169,12 +194,16 @@ app.post("/api/route", async (req, res): Promise<any> => {
     const { category, severity, location } = req.body;
 
     if (!category || !severity) {
-      return res.status(400).json({ error: "Missing required fields (category, severity)" });
+      return res
+        .status(400)
+        .json({ error: "Missing required fields (category, severity)" });
     }
 
     const geminiApiKey = process.env.GEMINI_API_KEY;
     if (!geminiApiKey) {
-      return res.status(500).json({ error: "Gemini API key is not configured on the server" });
+      return res
+        .status(500)
+        .json({ error: "Gemini API key is not configured on the server" });
     }
 
     const ai = new GoogleGenAI({
@@ -246,7 +275,11 @@ Return ONLY valid raw JSON conforming to the specified schema.`;
       const parsedData = JSON.parse(cleaned);
       return res.json({ routing: parsedData });
     } catch (parseError) {
-      console.error("Failed to parse routing agent response:", textOutput, parseError);
+      console.error(
+        "Failed to parse routing agent response:",
+        textOutput,
+        parseError,
+      );
       const fallback = {
         department: "Local Municipal Ward Office",
         departmentCode: "WARD",
@@ -259,7 +292,9 @@ Return ONLY valid raw JSON conforming to the specified schema.`;
     }
   } catch (error: any) {
     console.error("Error in /api/route endpoint:", error);
-    return res.status(500).json({ error: error.message || "Internal server error during routing" });
+    return res
+      .status(500)
+      .json({ error: error.message || "Internal server error during routing" });
   }
 });
 
@@ -280,12 +315,132 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[CityLens Server] Running on http://0.0.0.0:${PORT} in ${process.env.NODE_ENV || "development"} mode`);
+    console.log(
+      `[CityLens Server] Running on http://0.0.0.0:${PORT} in ${process.env.NODE_ENV || "development"} mode`,
+    );
   });
 }
 
 startServer().catch((err) => {
   console.error("Failed to start full-stack server:", err);
+});
+
+// ─── INSIGHT AGENT ─────────────────────────────────────────────────────────────
+app.post("/api/insights", async (req, res): Promise<any> => {
+  try {
+    const { reports } = req.body;
+
+    if (!reports || !Array.isArray(reports) || reports.length === 0) {
+      return res.status(400).json({ error: "No reports data provided" });
+    }
+
+    const geminiApiKey = process.env.GEMINI_API_KEY;
+    if (!geminiApiKey) {
+      return res.status(500).json({ error: "Gemini API key not configured" });
+    }
+
+    const ai = new GoogleGenAI({
+      apiKey: geminiApiKey,
+      httpOptions: { headers: { "User-Agent": "aistudio-build" } },
+    });
+
+    // Summarize reports for Gemini — don't send full objects
+    const summary = reports.map((r: any) => ({
+      category: r.analysis?.category,
+      severity: r.analysis?.severity,
+      severity_score: r.analysis?.severity_score,
+      department: r.analysis?.department,
+      location: r.landmark,
+      status: r.status,
+      createdAt: r.createdAt,
+    }));
+
+    const promptString = `You are an AI civic intelligence analyst for Indian cities.
+You have been given a dataset of ${reports.length} citizen-reported civic issues.
+
+Dataset:
+${JSON.stringify(summary, null, 2)}
+
+Analyze this data and generate exactly 4 actionable civic insights.
+Each insight must be specific, data-driven, and reference actual patterns in the data.
+
+Return ONLY valid JSON — no markdown, no backticks.`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: promptString,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            insights: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  title: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  type: {
+                    type: Type.STRING,
+                    description:
+                      "Must be: hotspot | trend | escalation | prediction",
+                  },
+                  severity: {
+                    type: Type.STRING,
+                    description: "Must be: info | warning | critical",
+                  },
+                  affectedArea: { type: Type.STRING },
+                  recommendedAction: { type: Type.STRING },
+                },
+                required: [
+                  "title",
+                  "description",
+                  "type",
+                  "severity",
+                  "affectedArea",
+                  "recommendedAction",
+                ],
+              },
+            },
+            summary: {
+              type: Type.STRING,
+              description: "One sentence overall city health summary",
+            },
+            criticalCount: { type: Type.INTEGER },
+            mostAffectedCategory: { type: Type.STRING },
+          },
+          required: [
+            "insights",
+            "summary",
+            "criticalCount",
+            "mostAffectedCategory",
+          ],
+        },
+      },
+    });
+
+    const textOutput = response.text;
+    if (!textOutput) throw new Error("No response from Gemini");
+
+    const cleaned = textOutput
+      .trim()
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/```\s*$/i, "")
+      .trim();
+
+    const parsedData = JSON.parse(cleaned);
+    return res.json({ insights: parsedData });
+  } catch (error: any) {
+    console.error("Error in /api/insights endpoint:", error);
+    return res
+      .status(500)
+      .json({
+        error:
+          error.message || "Internal server error during insights generation",
+      });
+  }
 });
 
 // ─── RESOLUTION AGENT ──────────────────────────────────────────────────────────
@@ -294,7 +449,9 @@ app.post("/api/resolve", async (req, res): Promise<any> => {
     const { afterImageBase64, mimeType, originalReport } = req.body;
 
     if (!afterImageBase64 || !originalReport) {
-      return res.status(400).json({ error: "Missing image or original report data" });
+      return res
+        .status(400)
+        .json({ error: "Missing image or original report data" });
     }
 
     const geminiApiKey = process.env.GEMINI_API_KEY;
@@ -346,7 +503,13 @@ Return ONLY valid JSON with no markdown or backticks.`;
               items: { type: Type.STRING },
             },
           },
-          required: ["isResolved", "fixQuality", "confidence", "verificationSummary", "remainingConcerns"],
+          required: [
+            "isResolved",
+            "fixQuality",
+            "confidence",
+            "verificationSummary",
+            "remainingConcerns",
+          ],
         },
       },
     });
@@ -355,7 +518,8 @@ Return ONLY valid JSON with no markdown or backticks.`;
     if (!textOutput) throw new Error("No response from Gemini");
 
     try {
-      const cleaned = textOutput.trim()
+      const cleaned = textOutput
+        .trim()
         .replace(/^```json\s*/i, "")
         .replace(/^```\s*/i, "")
         .replace(/```\s*$/i, "")
@@ -375,6 +539,12 @@ Return ONLY valid JSON with no markdown or backticks.`;
     }
   } catch (error: any) {
     console.error("Error in /api/resolve endpoint:", error);
-    return res.status(500).json({ error: error.message || "Internal server error during resolution verification" });
+    return res
+      .status(500)
+      .json({
+        error:
+          error.message ||
+          "Internal server error during resolution verification",
+      });
   }
 });
