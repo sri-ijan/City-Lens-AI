@@ -55,7 +55,7 @@ Rules:
 
     // Call the model using generateContent with a strict schema to guarantee valid JSON
     const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash-lite",
+      model: "gemini-2.5-flash",
       contents: [imagePart, promptString],
       config: {
         responseMimeType: "application/json",
@@ -219,7 +219,7 @@ The letter should:
 4. DO NOT use markdown headers, bold headers or code blocks. Just return the pure plain text of the letter.`;
 
     const response = await ai.models.generateContent({
-     model: "gemini-2.0-flash-lite",
+     model: "gemini-2.5-flash",
       contents: promptString,
     });
 
@@ -282,7 +282,7 @@ Analyze and determine:
 Return ONLY valid raw JSON conforming to the specified schema.`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash-lite",
+      model: "gemini-2.5-flash",
       contents: promptString,
       config: {
         responseMimeType: "application/json",
@@ -414,7 +414,7 @@ Analyze the after photo and determine:
 Return ONLY valid JSON.`;
 
     const response = await ai.models.generateContent({
-     model: "gemini-2.0-flash-lite",
+     model: "gemini-2.5-flash",
       contents: [imagePart, promptString],
       config: {
         responseMimeType: "application/json",
@@ -530,7 +530,7 @@ Analyze the reports and determine:
 Return ONLY valid JSON matching the requested schema.`;
 
     const response = await ai.models.generateContent({
-     model: "gemini-2.0-flash-lite",
+     model: "gemini-2.5-flash",
       contents: [promptString],
       config: {
         responseMimeType: "application/json",

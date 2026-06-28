@@ -1,20 +1,23 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# CityLens AI 🏙️
+> See. Report. Resolve.
 
-# Run and deploy your AI Studio app
+AI-powered hyperlocal civic issue reporting platform.
 
-This contains everything you need to run your app locally.
+## Features
+- 🤖 Vision Agent — Gemini analyzes civic issue photos
+- 🗺️ Routing Agent — Auto-assigns municipal department
+- ✅ Resolution Agent — Before/after verification  
+- 🧠 Insight Agent — City-wide pattern detection
+- 💚 GreenCoins — Civic reward tokens
+- 📍 Live Map — Geo-tagged issue tracking
+- 📝 Legal Complaint Generator
 
-View your app in AI Studio: https://ai.studio/apps/248a61f0-a93d-4b9f-b6c8-dd40c9ee1800
+## Tech Stack
+React + Vite + TypeScript + Firebase + Gemini 2.5 Flash
++ Google Maps API + Express + Node.js
 
-## Run Locally
-
-**Prerequisites:**  Node.js
-
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## Setup
+1. Clone repo
+2. `npm install`
+3. Add `.env` with keys
+4. `npm run dev`
