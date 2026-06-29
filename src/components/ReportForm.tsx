@@ -1,17 +1,23 @@
-import React, { useState, useRef, DragEvent, ChangeEvent, useEffect } from "react";
-import { 
-  UploadCloud, 
-  Trash2, 
-  Sparkles, 
-  Clock, 
-  Building, 
-  ShieldAlert, 
-  MapPin, 
+import React, {
+  useState,
+  useRef,
+  DragEvent,
+  ChangeEvent,
+  useEffect,
+} from "react";
+import {
+  UploadCloud,
+  Trash2,
+  Sparkles,
+  Clock,
+  Building,
+  ShieldAlert,
+  MapPin,
   User,
   CheckCircle,
   BarChart2,
   ThumbsUp,
-  AlertTriangle
+  AlertTriangle,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { analyzeIssueImage, CivicAnalysis } from "../services/geminiService";
@@ -24,17 +30,21 @@ interface ReportFormProps {
   onReportSubmitted?: () => void;
 }
 
-const GOOGLE_MAPS_API_KEY = (import.meta as any).env?.VITE_GOOGLE_MAPS_PLATFORM_KEY || "";
+const GOOGLE_MAPS_API_KEY =
+  (import.meta as any).env?.VITE_GOOGLE_MAPS_PLATFORM_KEY || "";
 
 export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
   const { user } = useAuth();
+
+  const [nonCivicError, setNonCivicError] = useState<string | null>(null);
+
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<CivicAnalysis | null>(null);
   const [loadingStep, setLoadingStep] = useState("");
-  
+
   // Custom user inputs to accompany the report
   const [landmark, setLandmark] = useState("");
   const [reporterName, setReporterName] = useState("");
@@ -42,8 +52,12 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
 
   // Location and Routing states
   const [isDetectingLocation, setIsDetectingLocation] = useState(false);
-  const [coordinates, setCoordinates] = useState<{ lat: number; lng: number; address: string } | null>(null);
-  
+  const [coordinates, setCoordinates] = useState<{
+    lat: number;
+    lng: number;
+    address: string;
+  } | null>(null);
+
   interface RoutingResult {
     department: string;
     departmentCode: string;
@@ -52,7 +66,9 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
     escalationPath: string[];
     contactHint: string;
   }
-  const [routingResult, setRoutingResult] = useState<RoutingResult | null>(null);
+  const [routingResult, setRoutingResult] = useState<RoutingResult | null>(
+    null,
+  );
   const [isRouting, setIsRouting] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -71,7 +87,7 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
     "Assessing Indian structural integrity...",
     "Detecting environmental safety hazards...",
     "Mapping to municipal department protocols...",
-    "Formulating action recommendations..."
+    "Formulating action recommendations...",
   ];
 
   const triggerSpinnerSequence = () => {
@@ -97,7 +113,7 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
   const handleDrop = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragging(false);
-    
+
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       processFile(e.dataTransfer.files[0]);
     }
@@ -114,7 +130,7 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
       toast.error("Please upload an image file (PNG, JPG, etc.)");
       return;
     }
-    
+
     // File size limit of 10MB
     if (file.size > 10 * 1024 * 1024) {
       toast.error("Image file is too large. Max size is 10MB.");
@@ -123,7 +139,7 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
 
     setImageFile(file);
     setAnalysis(null); // Clear previous analysis when a new file is uploaded
-    
+
     const reader = new FileReader();
     reader.onloadend = () => {
       setImagePreview(reader.result as string);
@@ -133,6 +149,7 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
   };
 
   const handleRemoveImage = () => {
+    setNonCivicError(null);
     setImageFile(null);
     setImagePreview(null);
     setAnalysis(null);
@@ -158,7 +175,9 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
       async (position) => {
         const { latitude, longitude } = position.coords;
         try {
-          toast.loading("Resolving coordinates to address...", { id: "gps-loading" });
+          toast.loading("Resolving coordinates to address...", {
+            id: "gps-loading",
+          });
           const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${GOOGLE_MAPS_API_KEY}`;
           const res = await fetch(url);
           if (!res.ok) {
@@ -169,30 +188,46 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
             const address = data.results[0].formatted_address;
             setLandmark(address);
             setCoordinates({ lat: latitude, lng: longitude, address });
-            toast.success("Location detected successfully! 📍", { id: "gps-loading" });
+            toast.success("Location detected successfully! 📍", {
+              id: "gps-loading",
+            });
           } else {
             console.warn("Geocoding was not successful:", data);
             const rawAddress = `Lat: ${latitude.toFixed(4)}, Lng: ${longitude.toFixed(4)}`;
             setLandmark(rawAddress);
-            setCoordinates({ lat: latitude, lng: longitude, address: rawAddress });
-            toast.success("Location set to GPS coordinates 📍", { id: "gps-loading" });
+            setCoordinates({
+              lat: latitude,
+              lng: longitude,
+              address: rawAddress,
+            });
+            toast.success("Location set to GPS coordinates 📍", {
+              id: "gps-loading",
+            });
           }
         } catch (error) {
           console.error("Geocoding Error:", error);
           const rawAddress = `Lat: ${latitude.toFixed(4)}, Lng: ${longitude.toFixed(4)}`;
           setLandmark(rawAddress);
-          setCoordinates({ lat: latitude, lng: longitude, address: rawAddress });
-          toast.success("Location set to GPS coordinates 📍", { id: "gps-loading" });
+          setCoordinates({
+            lat: latitude,
+            lng: longitude,
+            address: rawAddress,
+          });
+          toast.success("Location set to GPS coordinates 📍", {
+            id: "gps-loading",
+          });
         } finally {
           setIsDetectingLocation(false);
         }
       },
       (error) => {
         console.error("Geolocation Error:", error);
-        toast.error(`Could not access GPS: ${error.message}`, { id: "gps-loading" });
+        toast.error(`Could not access GPS: ${error.message}`, {
+          id: "gps-loading",
+        });
         setIsDetectingLocation(false);
       },
-      { enableHighAccuracy: true, timeout: 10000 }
+      { enableHighAccuracy: true, timeout: 10000 },
     );
   };
 
@@ -223,10 +258,23 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
       setRoutingResult({
         department: analysisResult.department || "Local Municipal Corporation",
         departmentCode: "MUNI",
-        priority: analysisResult.severity === "Critical" ? "P1" : analysisResult.severity === "High" ? "P2" : analysisResult.severity === "Medium" ? "P3" : "P4",
-        estimatedDays: analysisResult.estimated_repair_time.includes("24") ? 1 : 5,
-        escalationPath: ["Ward Inspector", "Executive Engineer", "Chief Commissioner"],
-        contactHint: "Local citizen portal hotline"
+        priority:
+          analysisResult.severity === "Critical"
+            ? "P1"
+            : analysisResult.severity === "High"
+              ? "P2"
+              : analysisResult.severity === "Medium"
+                ? "P3"
+                : "P4",
+        estimatedDays: analysisResult.estimated_repair_time.includes("24")
+          ? 1
+          : 5,
+        escalationPath: [
+          "Ward Inspector",
+          "Executive Engineer",
+          "Chief Commissioner",
+        ],
+        contactHint: "Local citizen portal hotline",
       });
     } finally {
       setIsRouting(false);
@@ -244,6 +292,26 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
 
     try {
       const result = await analyzeIssueImage(imageFile);
+
+      if (
+        result.is_civic_issue === false ||
+        result.category === "Not Applicable"
+      ) {
+        toast.error(
+          "This doesn't appear to be a civic issue. Please upload a photo of a real infrastructure problem like a pothole, garbage dump, or broken streetlight.",
+        );
+        setAnalysis(null);
+        return;
+      }
+
+      if (result.is_civic_issue === false) {
+        setNonCivicError(
+          "This doesn't appear to be a civic issue. Please upload a photo of a real infrastructure problem like a pothole, garbage dump, or broken streetlight.",
+        );
+        setAnalysis(null);
+        return;
+      }
+      setNonCivicError(null);
       setAnalysis(result);
       toast.success("AI Analysis Completed!");
       await handleCallRouting(result);
@@ -265,7 +333,7 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
 
     setIsSubmitting(true);
     const finalReporterName = reporterName.trim() || "Anonymous";
-    
+
     const payload = {
       analysis,
       landmark: landmark.trim() || "Unspecified location",
@@ -275,30 +343,42 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
       status: "Pending",
       upvotes: 0,
       ...(coordinates ? { coordinates } : {}),
-      ...(routingResult ? { routing: routingResult } : {})
+      ...(routingResult ? { routing: routingResult } : {}),
     };
 
     console.log("Submitting Civic Report:", payload);
 
     try {
       const docRef = await addDoc(collection(db, "reports"), payload);
-      
+
       if (user) {
-        await creditGreenCoins(user.uid, 10, "Report Submitted", docRef.id, true);
-        toast.success("Report saved! +10 GreenCoins credited to your civic wallet! 🏆");
+        await creditGreenCoins(
+          user.uid,
+          10,
+          "Report Submitted",
+          docRef.id,
+          true,
+        );
+        toast.success(
+          "Report saved! +10 GreenCoins credited to your civic wallet! 🏆",
+        );
       } else {
         const citizenRef = doc(db, "citizens", finalReporterName);
-        await setDoc(citizenRef, {
-          name: finalReporterName,
-          points: increment(10),
-          reportsCount: increment(1),
-          lastReportedAt: new Date().toISOString()
-        }, { merge: true });
+        await setDoc(
+          citizenRef,
+          {
+            name: finalReporterName,
+            points: increment(10),
+            reportsCount: increment(1),
+            lastReportedAt: new Date().toISOString(),
+          },
+          { merge: true },
+        );
         toast.success("Anonymous report saved! +10 Points registered! 🏆");
       }
-      
+
       handleRemoveImage();
-      
+
       if (onReportSubmitted) {
         onReportSubmitted();
       }
@@ -329,7 +409,6 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
   return (
     <div className="w-full max-w-6xl mx-auto px-4 py-6">
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
-        
         {/* Left Side: Upload and Form Controls */}
         <div className="lg:col-span-6 flex flex-col gap-6">
           <div className="rounded-2xl border border-[#2a2520] bg-[#161310] p-6 shadow-xl">
@@ -337,7 +416,7 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
               <UploadCloud className="h-5 w-5 text-amber-500" />
               <span>Capture & Upload Civic Issue</span>
             </h2>
-            
+
             {/* Image Upload Area */}
             {!imagePreview ? (
               <div
@@ -359,13 +438,14 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
                   accept="image/*"
                   className="hidden"
                 />
-                
+
                 <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#161310] border border-[#2a2520] group-hover:scale-105 transition-transform">
                   <UploadCloud className="h-7 w-7 text-stone-500 group-hover:text-amber-500 transition-colors" />
                 </div>
-                
+
                 <p className="text-sm font-semibold text-[#e7e5e4]">
-                  Drag and drop your image here, or <span className="text-amber-500">browse</span>
+                  Drag and drop your image here, or{" "}
+                  <span className="text-amber-500">browse</span>
                 </p>
                 <p className="mt-1.5 text-xs text-[#78716c]">
                   Supports PNG, JPG, JPEG, WEBP (Max 10MB)
@@ -379,7 +459,7 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
                   alt="Civic issue preview"
                   className="w-full max-h-[320px] object-contain mx-auto"
                 />
-                
+
                 {/* Delete/Remove button overlay */}
                 <button
                   type="button"
@@ -421,12 +501,15 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
 
           {/* Form details, only unlocked after AI has generated the report */}
           {analysis && (
-            <form onSubmit={handleSubmit} className="rounded-2xl border border-[#2a2520] bg-[#161310] p-6 shadow-xl flex flex-col gap-4">
+            <form
+              onSubmit={handleSubmit}
+              className="rounded-2xl border border-[#2a2520] bg-[#161310] p-6 shadow-xl flex flex-col gap-4"
+            >
               <h3 className="text-lg font-bold text-[#e7e5e4] flex items-center gap-2">
                 <MapPin className="h-5 w-5 text-amber-500" />
                 <span>Reporter Details & Submission</span>
               </h3>
-              
+
               <div>
                 <div className="flex justify-between items-center mb-1.5">
                   <label className="block text-xs font-semibold text-[#78716c] uppercase tracking-wider">
@@ -439,7 +522,11 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
                     className="flex items-center gap-1 text-[11px] font-bold text-amber-500 hover:text-amber-400 transition-colors disabled:text-stone-500 disabled:cursor-not-allowed"
                   >
                     <MapPin className="h-3.5 w-3.5 animate-pulse" />
-                    <span>{isDetectingLocation ? "Detecting..." : "Detect My Location"}</span>
+                    <span>
+                      {isDetectingLocation
+                        ? "Detecting..."
+                        : "Detect My Location"}
+                    </span>
                   </button>
                 </div>
                 <div className="relative">
@@ -495,12 +582,32 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
 
         {/* Right Side: Analysis Card */}
         <div className="lg:col-span-6">
-          {!analysis ? (
+          {nonCivicError ? (
+            <div
+              className="h-full rounded-2xl p-8 flex flex-col items-center justify-center text-center min-h-[350px]"
+              style={{
+                background: "#1c0a0a",
+                border: "1px solid rgba(239,68,68,0.2)",
+              }}
+            >
+              <AlertTriangle className="h-10 w-10 text-red-400 mb-4" />
+              <h3 className="text-base font-semibold text-red-400 mb-2">
+                Not a Civic Issue
+              </h3>
+              <p className="text-sm text-red-400/80 leading-relaxed max-w-xs">
+                {nonCivicError}
+              </p>
+            </div>
+          ) : !analysis ? (
             <div className="h-full rounded-2xl border border-[#2a2520] bg-[#161310] p-8 flex flex-col items-center justify-center text-center text-[#78716c] min-h-[350px]">
               <Sparkles className="h-12 w-12 text-[#2a2520] mb-4 animate-pulse" />
-              <h3 className="text-lg font-bold text-[#e7e5e4]/75">Awaiting AI Analysis</h3>
+              <h3 className="text-lg font-bold text-[#e7e5e4]/75">
+                Awaiting AI Analysis
+              </h3>
               <p className="mt-2 text-sm max-w-sm text-[#78716c] leading-relaxed">
-                Upload a photo of any Indian civic issue—such as potholes, garbage piles, broken lights, or water leaks—to inspect with Gemini AI.
+                Upload a photo of any Indian civic issue—such as potholes,
+                garbage piles, broken lights, or water leaks—to inspect with
+                Gemini AI.
               </p>
             </div>
           ) : (
@@ -513,28 +620,37 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
                   <Sparkles className="h-3.5 w-3.5" />
                   AI Analysis Completed
                 </span>
-                
+
                 <span className="text-xs font-mono text-[#78716c]">
-                  Confidence: <span className="text-amber-500 font-semibold">{(analysis.confidence * 100).toFixed(0)}%</span>
+                  Confidence:{" "}
+                  <span className="text-amber-500 font-semibold">
+                    {(analysis.confidence * 100).toFixed(0)}%
+                  </span>
                 </span>
               </div>
 
               {/* Title & Category */}
               <div className="border-b border-[#2a2520] pb-4 mb-4">
                 <div className="flex items-center gap-2 flex-wrap mb-1.5">
-                  <span className={`text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${getSeverityBadgeClass(analysis.severity)}`}>
+                  <span
+                    className={`text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${getSeverityBadgeClass(analysis.severity)}`}
+                  >
                     {analysis.severity} Severity
                   </span>
                   <span className="text-xs bg-[#0f0d0b] text-[#e7e5e4] px-2 py-0.5 rounded border border-[#2a2520]">
                     {analysis.category}
                   </span>
                 </div>
-                <h3 className="text-xl font-bold text-[#e7e5e4] leading-snug">{analysis.title}</h3>
+                <h3 className="text-xl font-bold text-[#e7e5e4] leading-snug">
+                  {analysis.title}
+                </h3>
               </div>
 
               {/* Description */}
               <div className="mb-5">
-                <h4 className="text-xs font-semibold uppercase text-[#78716c] tracking-wider mb-2">Visible Evidence Description</h4>
+                <h4 className="text-xs font-semibold uppercase text-[#78716c] tracking-wider mb-2">
+                  Visible Evidence Description
+                </h4>
                 <p className="text-sm text-[#e7e5e4] bg-[#0f0d0b] p-4 rounded-xl border border-[#2a2520] leading-relaxed">
                   {analysis.description}
                 </p>
@@ -548,7 +664,8 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
                     Severity Score
                   </div>
                   <p className="text-lg font-bold text-[#e7e5e4]">
-                    {analysis.severity_score} <span className="text-xs text-[#78716c]">/ 10</span>
+                    {analysis.severity_score}{" "}
+                    <span className="text-xs text-[#78716c]">/ 10</span>
                   </p>
                 </div>
 
@@ -582,8 +699,8 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
                   </h4>
                   <div className="flex flex-wrap gap-1.5">
                     {analysis.hazards.map((hazard, index) => (
-                      <span 
-                        key={index} 
+                      <span
+                        key={index}
                         className="text-xs bg-amber-500/5 border border-amber-500/20 text-[#e7e5e4] px-2.5 py-1 rounded-lg font-medium"
                       >
                         ⚠ {hazard}
@@ -603,7 +720,6 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
                   {analysis.recommended_action}
                 </p>
               </div>
-
             </div>
           )}
 
@@ -611,7 +727,7 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
           {analysis && (
             <div className="mt-6 rounded-2xl border border-[#2a2520] bg-[#161310] p-6 shadow-xl relative overflow-hidden">
               <div className="absolute top-0 right-0 left-0 h-[3px] bg-gradient-to-r from-emerald-600 via-teal-700 to-blue-800"></div>
-              
+
               <div className="flex items-center justify-between gap-4 mb-4">
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-400 border border-emerald-500/20">
                   <Sparkles className="h-3.5 w-3.5" />
@@ -646,15 +762,17 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
                       <span className="text-[10px] font-bold text-[#78716c] uppercase tracking-wider block mb-1">
                         SLA Routing Priority
                       </span>
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border mt-1 ${
-                        routingResult.priority === "P1"
-                          ? "bg-red-950/40 text-red-400 border-red-900/50"
-                          : routingResult.priority === "P2"
-                          ? "bg-orange-950/40 text-orange-400 border-orange-900/50"
-                          : routingResult.priority === "P3"
-                          ? "bg-amber-950/40 text-amber-400 border-amber-900/50"
-                          : "bg-stone-900/60 text-[#e7e5e4] border-stone-800"
-                      }`}>
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border mt-1 ${
+                          routingResult.priority === "P1"
+                            ? "bg-red-950/40 text-red-400 border-red-900/50"
+                            : routingResult.priority === "P2"
+                              ? "bg-orange-950/40 text-orange-400 border-orange-900/50"
+                              : routingResult.priority === "P3"
+                                ? "bg-amber-950/40 text-amber-400 border-amber-900/50"
+                                : "bg-stone-900/60 text-[#e7e5e4] border-stone-800"
+                        }`}
+                      >
                         {routingResult.priority}
                       </span>
                     </div>
@@ -670,26 +788,31 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
                   </div>
 
                   {/* Escalation Path */}
-                  {routingResult.escalationPath && routingResult.escalationPath.length > 0 && (
-                    <div className="bg-[#0f0d0b]/40 border border-[#2a2520] p-4 rounded-xl">
-                      <span className="text-[10px] font-bold text-[#78716c] uppercase tracking-wider block mb-2">
-                        Escalation & Resolution Path
-                      </span>
-                      <ol className="relative border-l border-[#2a2520] ml-2 pl-4 space-y-3">
-                        {routingResult.escalationPath.map((step, index) => (
-                          <li key={index} className="text-xs relative">
-                            <span className="absolute -left-[22px] top-1 flex h-2 w-2 items-center justify-center rounded-full bg-amber-600 ring-4 ring-[#161310]" />
-                            <p className="font-semibold text-stone-300">{step}</p>
-                          </li>
-                        ))}
-                      </ol>
-                    </div>
-                  )}
+                  {routingResult.escalationPath &&
+                    routingResult.escalationPath.length > 0 && (
+                      <div className="bg-[#0f0d0b]/40 border border-[#2a2520] p-4 rounded-xl">
+                        <span className="text-[10px] font-bold text-[#78716c] uppercase tracking-wider block mb-2">
+                          Escalation & Resolution Path
+                        </span>
+                        <ol className="relative border-l border-[#2a2520] ml-2 pl-4 space-y-3">
+                          {routingResult.escalationPath.map((step, index) => (
+                            <li key={index} className="text-xs relative">
+                              <span className="absolute -left-[22px] top-1 flex h-2 w-2 items-center justify-center rounded-full bg-amber-600 ring-4 ring-[#161310]" />
+                              <p className="font-semibold text-stone-300">
+                                {step}
+                              </p>
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
+                    )}
 
                   {/* Contact Hint */}
                   {routingResult.contactHint && (
                     <div className="bg-emerald-950/10 border border-emerald-900/20 p-3 rounded-xl text-[11px] text-stone-400">
-                      <span className="font-bold text-emerald-400 block mb-0.5">Nodal Contact Hint:</span>
+                      <span className="font-bold text-emerald-400 block mb-0.5">
+                        Nodal Contact Hint:
+                      </span>
                       {routingResult.contactHint}
                     </div>
                   )}
@@ -702,7 +825,6 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
             </div>
           )}
         </div>
-
       </div>
     </div>
   );

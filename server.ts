@@ -46,12 +46,24 @@ app.post("/api/analyze", async (req, res): Promise<any> => {
     };
 
     const promptString = `You are an AI civic infrastructure inspector for India.
-Analyze the uploaded image and return ONLY valid raw JSON representing the identified issue.
+Analyze the uploaded image carefully.
 
-Rules:
-* Be factual and precise.
-* Describe only visible evidence.
-* Identify specific hazards, local municipal departments in India (e.g., PWD, BBMP, Jal Board, BESCOM, MCD, local ward office, etc.), and realistic repair times.`;
+IMPORTANT: If the image does NOT show a real-world civic infrastructure issue 
+(e.g. it's a logo, screenshot, person, animal, indoor photo, or unrelated image), 
+set "is_civic_issue" to false and "category" to "Not Applicable".
+
+Only analyze actual outdoor civic problems like potholes, garbage, broken 
+streetlights, water leakage, damaged roads, drainage issues, encroachments.
+* If the image is NOT a real outdoor civic infrastructure issue 
+  (logo, screenshot, person, indoor photo, animal, etc.), 
+  set "is_civic_issue" to false and "category" to "Not Applicable".
+* If it IS a civic issue, set "is_civic_issue" to true.
+
+Return ONLY valid JSON with these fields:
+- is_civic_issue: boolean
+- category, severity, severity_score, confidence, title, 
+  description, hazards, department, recommended_action, 
+  estimated_repair_time`;
 
     // Call the model using generateContent with a strict schema to guarantee valid JSON
     const response = await ai.models.generateContent({
@@ -61,7 +73,13 @@ Rules:
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
+
           properties: {
+            is_civic_issue: {
+              type: Type.BOOLEAN,
+              description:
+                "True if image shows a real civic infrastructure issue, false otherwise",
+            },
             category: {
               type: Type.STRING,
               description:
@@ -113,6 +131,7 @@ Rules:
             },
           },
           required: [
+             "is_civic_issue",
             "category",
             "severity",
             "severity_score",
@@ -219,7 +238,7 @@ The letter should:
 4. DO NOT use markdown headers, bold headers or code blocks. Just return the pure plain text of the letter.`;
 
     const response = await ai.models.generateContent({
-     model: "gemini-2.5-flash",
+      model: "gemini-2.5-flash",
       contents: promptString,
     });
 
@@ -414,7 +433,7 @@ Analyze the after photo and determine:
 Return ONLY valid JSON.`;
 
     const response = await ai.models.generateContent({
-     model: "gemini-2.5-flash",
+      model: "gemini-2.5-flash",
       contents: [imagePart, promptString],
       config: {
         responseMimeType: "application/json",
@@ -530,7 +549,7 @@ Analyze the reports and determine:
 Return ONLY valid JSON matching the requested schema.`;
 
     const response = await ai.models.generateContent({
-     model: "gemini-2.5-flash",
+      model: "gemini-2.5-flash",
       contents: [promptString],
       config: {
         responseMimeType: "application/json",
