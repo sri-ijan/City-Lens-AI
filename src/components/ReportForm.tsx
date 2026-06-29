@@ -334,6 +334,35 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
     setIsSubmitting(true);
     const finalReporterName = reporterName.trim() || "Anonymous";
 
+    let finalCoordinates = coordinates;
+
+    if (!finalCoordinates && landmark.trim()) {
+      try {
+        const response = await fetch(
+          `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
+            landmark,
+          )}&key=${GOOGLE_MAPS_API_KEY}`,
+        );
+
+        const data = await response.json();
+
+        console.log("Geocode data:", data);
+
+        if (data.status === "OK" && data.results.length) {
+          const loc = data.results[0].geometry.location;
+
+          finalCoordinates = {
+            lat: loc.lat,
+            lng: loc.lng,
+            address: data.results[0].formatted_address,
+          };
+        }
+      } catch (err) {
+        console.error("Geocoding failed:", err);
+        toast.error(`Geocoding failed: ${String(err)}`);
+      }
+    }
+    console.log("Final coordinates:", finalCoordinates);
     const payload = {
       analysis,
       landmark: landmark.trim() || "Unspecified location",
@@ -342,7 +371,7 @@ export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
       createdAt: new Date().toISOString(),
       status: "Pending",
       upvotes: 0,
-      ...(coordinates ? { coordinates } : {}),
+      ...(finalCoordinates ? { coordinates: finalCoordinates } : {}),
       ...(routingResult ? { routing: routingResult } : {}),
     };
 
