@@ -33,6 +33,8 @@ interface ReportFormProps {
 const GOOGLE_MAPS_API_KEY =
   (import.meta as any).env?.VITE_GOOGLE_MAPS_PLATFORM_KEY || "";
 
+console.log("MAP KEY LENGTH:", GOOGLE_MAPS_API_KEY.length);
+
 export default function ReportForm({ onReportSubmitted }: ReportFormProps) {
   const { user } = useAuth();
 
